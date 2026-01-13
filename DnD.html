@@ -1,0 +1,3786 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Конструктор Щита v2.9.5</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <style>
+        /* --- Layout --- */
+        body, html { margin: 0; padding: 0; height: 100%; font-family: 'Segoe UI', sans-serif; overflow: hidden; user-select: none; }
+        .container { display: flex; height: 100%; }
+        
+        /* --- Workspace --- */
+        #workspace {
+            width: 100%; height: 100%; background-color: #f4f4f9;
+            background-image: radial-gradient(#bdc3c7 1px, transparent 1px);
+            background-size: 20px 20px; 
+            position: relative; 
+            overflow-y: auto; overflow-x: hidden;
+            box-shadow: inset -5px 0 10px rgba(0,0,0,0.05);
+            scroll-behavior: smooth;
+        }
+        
+        #wires-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 50; min-height: 100%; }
+        #comb-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 110; min-height: 100%; }
+        
+        path.wire { fill: none; cursor: pointer; pointer-events: stroke; transition: opacity 0.1s; stroke-linecap: square; stroke-linejoin: round; }
+        path.wire:hover { opacity: 0.5; stroke-width: 8px !important; }
+        path.wire.comb { stroke-width: 7px !important; opacity: 1; pointer-events: stroke; }
+        path.wire.comb:hover { stroke: #d35400 !important; cursor: pointer; }
+        path.drag-wire { fill: none; stroke-dasharray: 5; opacity: 0.6; pointer-events: none;}
+        path.ghost-wire { fill: none; stroke: rgba(52, 152, 219, 0.5); stroke-width: 4; stroke-dasharray: 5,3; pointer-events: none; }
+
+        /* Pivots - Улучшенные стили */
+        circle.pivot {
+            cursor: move; pointer-events: all; z-index: 200;
+            transition: r 0.1s, fill 0.1s;
+        }
+        circle.pivot:hover { r: 6px; }
+        circle.pivot.p-vertical { cursor: ns-resize; fill: #3498db; stroke: #2980b9; stroke-width: 1.5px; }
+        circle.pivot.p-corner { cursor: move; fill: #e74c3c; stroke: #c0392b; stroke-width: 1.5px; }
+        circle.pivot:hover { stroke-width: 2px; filter: drop-shadow(0 0 3px rgba(0,0,0,0.3)); }
+
+        /* Tooltip для проводов */
+        .wire-tooltip {
+            position: fixed;
+            background: rgba(44, 62, 80, 0.95);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 10000;
+            pointer-events: none;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            border: 1px solid #34495e;
+            min-width: 180px;
+            max-width: 250px;
+            transform: translate(10px, 10px);
+        }
+        .wire-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -6px;
+            width: 0;
+            height: 0;
+            border-top: 6px solid transparent;
+            border-bottom: 6px solid transparent;
+            border-right: 6px solid rgba(44, 62, 80, 0.95);
+        }
+        .wire-tooltip div {
+            margin: 2px 0;
+            line-height: 1.3;
+        }
+        .wire-tooltip .wire-title {
+            font-weight: bold;
+            border-bottom: 1px solid #46637f;
+            padding-bottom: 4px;
+            margin-bottom: 6px;
+        }
+
+        /* Контекстное меню */
+        .context-menu {
+            position: fixed;
+            background: white;
+            border: 1px solid #bdc3c7;
+            border-radius: 4px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 10000;
+            min-width: 160px;
+            display: none;
+        }
+        .context-menu.active {
+            display: block;
+        }
+        .context-menu-item {
+            padding: 8px 16px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        .context-menu-item:hover {
+            background: #ecf0f1;
+        }
+        .context-menu-divider {
+            height: 1px;
+            background: #ecf0f1;
+            margin: 4px 0;
+        }
+
+        /* Контекстное меню для модулей */
+        .module-context-menu {
+            position: fixed;
+            background: white;
+            border: 1px solid #bdc3c7;
+            border-radius: 4px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 10000;
+            min-width: 160px;
+            display: none;
+        }
+        .module-context-menu.active {
+            display: block;
+        }
+
+        /* Анимация для клеммы при начале проводки */
+        .terminal.wiring-start {
+            animation: pulse 0.5s infinite alternate;
+            box-shadow: 0 0 10px #f39c12 !important;
+            border-color: #f39c12 !important;
+        }
+        @keyframes pulse {
+            from { transform: scale(1.1); }
+            to { transform: scale(1.3); }
+        }
+
+        /* Визуальная обратная связь при невозможности соединения */
+        .terminal.invalid-connection {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        .terminal.valid-connection {
+            opacity: 1;
+            cursor: crosshair;
+        }
+
+        /* Визуальное обозначение тегов на клеммах */
+        .terminal::after {
+            content: attr(data-tag);
+            position: absolute;
+            top: -18px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 9px;
+            font-weight: bold;
+            color: #2c3e50;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 1px 4px;
+            border-radius: 2px;
+            border: 1px solid #bdc3c7;
+            white-space: nowrap;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+            pointer-events: none;
+            z-index: 150;
+        }
+        .terminal:hover::after {
+            opacity: 1;
+        }
+        .terminal.input-terminal::after {
+            top: -22px;
+            font-size: 10px;
+            background: rgba(44, 62, 80, 0.9);
+            color: white;
+            border: 1px solid #34495e;
+        }
+        
+        /* Цвета тегов */
+        .terminal[data-tag="L1"]::after { color: #e74c3c; border-color: #e74c3c; }
+        .terminal[data-tag="L2"]::after { color: #f1c40f; border-color: #f1c40f; }
+        .terminal[data-tag="L3"]::after { color: #3498db; border-color: #3498db; }
+        .terminal[data-tag="N"]::after { color: #3498db; border-color: #3498db; }
+        .terminal[data-tag="PE"]::after { color: #27ae60; border-color: #27ae60; }
+        .terminal[data-tag="R"]::after { color: #7f8c8d; border-color: #7f8c8d; }
+
+        /* --- Input Block (Main Supply) - VERTICAL --- */
+        #main-inputs {
+            position: absolute; top: 60px; left: 40px;
+            background: #2c3e50; color: white; border-radius: 4px;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.3); z-index: 100;
+            display: flex; flex-direction: column; gap: 15px; border: 2px solid #34495e;
+            padding: 15px 10px 15px 15px; width: 80px;
+        }
+        .input-terminal-group { display: flex; flex-direction: row; align-items: center; justify-content: space-between; position: relative; width: 100%; }
+        .input-label { font-size: 14px; font-weight: bold; color: #ecf0f1; order: 1; }
+        .input-terminal { 
+            width: 14px; height: 14px; background: #95a5a6; border-radius: 50%; border: 2px solid #7f8c8d; 
+            cursor: pointer; transition: 0.2s; order: 2;
+        }
+        .input-terminal:hover { transform: scale(1.2); border-color: white; }
+        .grp-l1 .input-label { color: #e74c3c; } .grp-l2 .input-label { color: #e74c3c; } .grp-l3 .input-label { color: #e74c3c; }
+        .grp-n .input-label { color: #3498db; } .grp-pe .input-label { color: #f1c40f; }
+
+        /* --- Sidebar --- */
+        #sidebar {
+            width: 25%; background-color: #2c3e50; padding: 15px; box-sizing: border-box; color: white;
+            display: flex; flex-direction: column; z-index: 200; box-shadow: -2px 0 10px rgba(0,0,0,0.3); height: 100%;
+        }
+        .sidebar-content { flex-grow: 1; overflow-y: auto; padding-right: 5px; }
+        h2, h3 { margin-top: 0; text-align: center; color: #ecf0f1; }
+        h3 { font-size: 0.95rem; margin-top: 15px; border-bottom: 1px solid #46637f; padding-bottom: 5px; text-align: left;}
+        
+        .grid-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        button.sidebar-btn {
+            padding: 8px; background-color: #34495e; color: white; border: 1px solid #46637f;
+            border-radius: 4px; cursor: pointer; text-align: center; font-size: 0.85rem; transition: 0.2s;
+        }
+        button.sidebar-btn:hover { background-color: #1abc9c; border-color: #16a085; }
+        button.full-width { grid-column: span 2; }
+        
+        /* Tools */
+        .tools-section { background: rgba(0,0,0,0.2); padding: 10px; border-radius: 4px; margin-bottom: 10px; border: 1px solid #34495e;}
+        .tool-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .tool-label { font-size: 0.8rem; color: #bdc3c7; }
+        
+        .color-palette { 
+            display: flex; gap: 4px; flex-wrap: wrap; width: 100%; margin-top: 5px;
+            justify-content: space-between;
+        }
+        .color-opt { 
+            width: 20px; height: 20px; border-radius: 50%; cursor: pointer; 
+            border: 2px solid transparent; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            flex-shrink: 0;
+        }
+        .color-opt.selected { border-color: white; transform: scale(1.15); box-shadow: 0 0 8px rgba(255,255,255,0.8); z-index: 10; }
+        
+        /* Цвета проводов - без белого и черного */
+        .bg-red { background: #e74c3c; } 
+        .bg-blue { background: #3498db; }
+        .bg-pe { background: repeating-linear-gradient(135deg, #2ecc71, #2ecc71 4px, #f1c40f 4px, #f1c40f 8px); }
+        .bg-yellow { background: #f1c40f; }
+        .bg-black-red { background: repeating-linear-gradient(135deg, #2c3e50, #2c3e50 4px, #c0392b 4px, #c0392b 6px); }
+        .bg-red-black { background: repeating-linear-gradient(135deg, #c0392b, #c0392b 4px, #2c3e50 4px, #2c3e50 6px); }
+        .bg-green { background: #27ae60; }
+        .bg-orange { background: #e67e22; }
+        .bg-purple { background: #9b59b6; }
+        .bg-pink { background: #e84393; }
+        .bg-brown { background: #795548; }
+        .bg-gray { background: #7f8c8d; }
+        .bg-cyan { background: #00cec9; }
+        .bg-blue-green { background: repeating-linear-gradient(135deg, #3498db, #3498db 4px, #27ae60 4px, #27ae60 8px); }
+        .bg-red-yellow { background: repeating-linear-gradient(135deg, #e74c3c, #e74c3c 4px, #f1c40f 4px, #f1c40f 8px); }
+
+        .mode-btn { padding: 4px 8px; font-size: 0.75rem; background: #34495e; border: 1px solid #46637f; color: #ccc; cursor: pointer; border-radius: 3px; }
+        .mode-btn.active { background: #1abc9c; color: white; border-color: #16a085; }
+        select.tool-select { background: #34495e; color: white; border: 1px solid #46637f; padding: 2px 5px; border-radius: 3px; font-size: 0.8rem; outline: none; }
+
+        /* Estimate / Schematic Hidden Table */
+        #data-wrapper { margin-top: 10px; background: white; color: #333; border-radius: 4px; display: flex; flex-direction: column; max-height: 25vh; flex-shrink: 0; }
+        .data-header { padding: 8px; background: #bdc3c7; font-weight: bold; font-size: 0.8rem; text-align: center; border-bottom: 1px solid #999;}
+        #data-scroll { overflow-y: auto; flex-grow: 1; }
+        table.data-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+        table.data-table td, table.data-table th { padding: 4px 8px; border-bottom: 1px solid #eee; text-align: left;}
+        table.data-table th { background: #eee; }
+
+        /* Rails & Modules */
+        .din-rail {
+            position: absolute; 
+            height: 160px; 
+            background-color: rgba(0,0,0,0.02); 
+            border: 2px dashed #bdc3c7; 
+            border-radius: 6px;
+            display: flex; 
+            align-items: center; 
+            padding: 0 20px; 
+            box-sizing: border-box; 
+            z-index: 10;
+            transition: top 0.3s ease; 
+            gap: 5px;
+        }
+        .din-rail-metal {
+            position: absolute; left: 0; right: 0; top: 50%; height: 35px;
+            background: linear-gradient(to bottom, #95a5a6 0%, #ecf0f1 20%, #7f8c8d 50%, #ecf0f1 80%, #95a5a6 100%);
+            border-top: 1px solid #555; border-bottom: 1px solid #555; transform: translateY(-50%); z-index: 0;
+        }
+        .btn-delete-rail {
+            position: absolute; right: -25px; top: 50%; transform: translateY(-50%);
+            background: #c0392b; width: 20px; height: 20px; border-radius: 50%; color: white;
+            text-align: center; line-height: 20px; cursor: pointer; font-size: 12px;
+        }
+
+        .module {
+            position: absolute; height: 140px; background: #fdfdfd; border: 1px solid #7f8c8d; border-radius: 2px;
+            box-shadow: 2px 2px 6px rgba(0,0,0,0.2); cursor: grab; z-index: 100;
+            display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box;
+            background: linear-gradient(135deg, #fff 0%, #ecf0f1 100%);
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        
+        /* Стиль для выделенных модулей */
+        .module.selected {
+            border-color: #3498db;
+            border-width: 2px;
+            box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.3), 2px 2px 6px rgba(0,0,0,0.2);
+        }
+        
+        .module.bus { border-color: #2c3e50; justify-content: center; }
+        .module.bus.n-type { background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); }
+        .module.bus.pe-type { background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%); }
+        .module.bus.horizontal { height: 50px; margin-top: 30px; }
+        .module.bus.horizontal .terminals { height: 100%; flex-wrap: wrap; align-content: center; gap: 4px; }
+        .module.bus.vertical { width: 40px !important; flex-direction: row; }
+        .module.bus.vertical .terminals { width: 100%; height: 100%; flex-direction: column; flex-wrap: wrap; align-content: center; justify-content: center; gap: 4px; }
+        .module.bus .face-plate { display: none; }
+        .module.bus .terminal { background: #f1c40f; border-color: #d35400; box-shadow: none; width: 8px; height: 8px; margin: 0;}
+
+        /* Color-coded modules */
+        .module.breaker { border-color: #e74c3c; background: linear-gradient(135deg, #fff 0%, #ffebee 100%); }
+        .module.breaker .face-plate { border-top: 1px solid #e74c3c; border-bottom: 1px solid #e74c3c; }
+        
+        .module.rcd { border-color: #3498db; background: linear-gradient(135deg, #fff 0%, #e3f2fd 100%); }
+        .module.rcd .face-plate { border-top: 1px solid #3498db; border-bottom: 1px solid #3498db; }
+        
+        .module.diff { border-color: #c0392b; background: linear-gradient(135deg, #fff 0%, #ffebee 100%); }
+        .module.diff .face-plate { border-top: 1px solid #c0392b; border-bottom: 1px solid #c0392b; }
+        
+        .module.loadSwitch { border-color: #27ae60; background: linear-gradient(135deg, #fff 0%, #e8f5e9 100%); }
+        .module.loadSwitch .face-plate { border-top: 1px solid #27ae60; border-bottom: 1px solid #27ae60; }
+        
+        .module.timeRelay { border-color: #9b59b6; background: linear-gradient(135deg, #fff 0%, #f3e5f5 100%); }
+        .module.timeRelay .face-plate { border-top: 1px solid #9b59b6; border-bottom: 1px solid #9b59b6; }
+        
+        .module.socket { border-color: #f39c12; background: linear-gradient(135deg, #fff 0%, #fff3e0 100%); }
+        .module.socket .face-plate { border-top: 1px solid #f39c12; border-bottom: 1px solid #f39c12; }
+        
+        .module.timer { border-color: #16a085; background: linear-gradient(135deg, #fff 0%, #e0f2f1 100%); }
+        .module.timer .face-plate { border-top: 1px solid #16a085; border-bottom: 1px solid #16a085; }
+        
+        .module.voltageRelay { border-color: #8e44ad; background: linear-gradient(135deg, #fff 0%, #f3e5f5 100%); }
+        .module.voltageRelay .face-plate { border-top: 1px solid #8e44ad; border-bottom: 1px solid #8e44ad; }
+        
+        .module.phaseControl { border-color: #d35400; background: linear-gradient(135deg, #fff 0%, #fff3e0 100%); }
+        .module.phaseControl .face-plate { border-top: 1px solid #d35400; border-bottom: 1px solid #d35400; }
+        
+        .module.phaseSelector { border-color: #2c3e50; background: linear-gradient(135deg, #fff 0%, #cfd8dc 100%); }
+        .module.phaseSelector .face-plate { border-top: 1px solid #2c3e50; border-bottom: 1px solid #2c3e50; }
+        
+        .module.counter { border-color: #7f8c8d; background: linear-gradient(135deg, #fff 0%, #eceff1 100%); }
+        .module.counter .face-plate { border-top: 1px solid #7f8c8d; border-bottom: 1px solid #7f8c8d; }
+        
+        /* Переключатель (Switch) Module */
+        .module.switch { border-color: #8e44ad; background: linear-gradient(135deg, #fff 0%, #f0e6ff 100%); }
+        .module.switch .face-plate { border-top: 1px solid #8e44ad; border-bottom: 1px solid #8e44ad; }
+       
+        .module.switch .switch-label {
+            font-size: 10px;
+            color: #8e44ad;
+            font-weight: bold;
+            text-align: center;
+            margin-top: 2px;
+        }
+
+        /* SPD (УЗИП) Module */
+        .module.spd { border-color: #8e44ad; background: linear-gradient(135deg, #fff 0%, #f5e6ff 100%); }
+        .module.spd .face-plate { border-top: 1px solid #9b59b6; border-bottom: 1px solid #9b59b6; }
+        .module.spd .spd-icon {
+            width: 20px; height: 20px; margin: 5px auto 3px;
+            background: linear-gradient(45deg, #8e44ad, #9b59b6);
+            border-radius: 50%;
+            position: relative;
+            border: 2px solid #3498db;
+        }
+        .module.spd .spd-icon::before, .module.spd .spd-icon::after {
+            content: ''; position: absolute; background: #fff;
+        }
+        .module.spd .spd-icon::before {
+            width: 8px; height: 2px; top: 50%; left: 50%;
+            transform: translate(-50%, -50%) rotate(45deg);
+        }
+        .module.spd .spd-icon::after {
+            width: 2px; height: 8px; top: 50%; left: 50%;
+            transform: translate(-50%, -50%) rotate(45deg);
+        }
+        .module.spd .label-ka { 
+            font-size: 9px; color: #8e44ad; font-weight: bold;
+            margin-top: 2px;
+        }
+        
+        /* RCCB (УЗПД) Module */
+        .module.rccb { border-color: #d35400; background: linear-gradient(135deg, #fff 0%, #ffe6d5 100%); }
+        .module.rccb .face-plate { border-top: 1px solid #e67e22; border-bottom: 1px solid #e67e22; }
+        .module.rccb .rccb-icon {
+            width: 20px; height: 20px; margin: 5px auto 3px;
+            background: linear-gradient(45deg, #d35400, #e67e22);
+            border-radius: 4px;
+            position: relative;
+        }
+        .module.rccb .rccb-icon::before {
+            content: 'RCCB'; position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%); color: white;
+            font-size: 6px; font-weight: bold; letter-spacing: 0.5px;
+        }
+
+        /* Terminals */
+        .terminals { height: 12px; width: 100%; display: flex; justify-content: space-around; padding: 2px 0; z-index: 101; }
+        .terminal {
+            width: 9px; height: 9px; background: #555; border-radius: 50%; border: 1px solid #333;
+            box-shadow: inset 1px 1px 2px #000; cursor: crosshair; transition: 0.2s;
+            position: relative;
+        }
+        .terminal:hover { transform: scale(1.3); border-color: #fff; }
+        .terminal.connected { border-color: #fff !important; box-shadow: 0 0 4px #000; }
+        
+        /* Face Plate */
+        .face-plate { 
+            flex-grow: 1; position: relative; 
+            border-top: 1px solid #bdc3c7; border-bottom: 1px solid #bdc3c7; 
+            display: flex; flex-direction: column; align-items: center; 
+            padding: 4px; padding-top: 8px; 
+            gap: 2px;
+        }
+        .stripe { width: 100%; height: 4px; position: absolute; top: 0; left: 0; }
+        .stripe.red { background: #e74c3c; }
+        .stripe.blue { background: #3498db; } 
+        .stripe.green { background: #27ae60; }
+        .stripe.purple { background: #8e44ad; } 
+        .stripe.orange { background: #d35400; }
+        .stripe.yellow { background: #f1c40f; }
+        .stripe.teal { background: #16a085; }
+        .stripe.brown { background: #795548; }
+        .stripe.gray { background: #7f8c8d; }
+        .stripe.violet { background: #8e44ad; }
+
+        /* Switch Box Fixed */
+        .switch-box { 
+            width: 14px; height: 24px; 
+            background: #333; 
+            margin-top: auto; 
+            margin-bottom: 4px;
+            position: relative; border-radius: 2px; z-index: 102; cursor: pointer;
+            flex-shrink: 0; 
+        }
+        .switch-lever { width: 100%; height: 50%; background: #333; position: absolute; bottom: 0; border: 1px solid #555; box-sizing: border-box; transition: 0.2s;}
+        .module.on .switch-lever { top: 0; bottom: auto; background: #e67e22; }
+
+        .label-type { font-size: 9px; font-weight: bold; width: 100%; text-align: center; z-index: 103; margin-top: 2px; color: #333; line-height: 1;}
+        .label-amps { font-size: 10px; font-weight: bold; color: #333; z-index: 103; margin-top: 1px;}
+        .label-leakage { font-size: 8px; color: #c0392b; margin-top: 0; z-index: 103; line-height: 1; }
+        
+        .btn-test { width: 12px; height: 8px; margin-top: 4px; border-radius: 2px; font-size: 6px; display: flex; align-items: center; justify-content: center; color: white; cursor: pointer; z-index: 102;}
+        .test-gray { background: #7f8c8d; } .test-yellow { background: #f1c40f; color: #333; }
+
+        .screen { width: 80%; height: 14px; background: #cce; border: 1px inset #999; font-family: monospace; font-size: 9px; display: flex; align-items: center; justify-content: center; margin-top: 2px; }
+        .dial { width: 22px; height: 22px; border-radius: 50%; border: 1px solid #555; margin-top: 4px; position: relative; background: #fff;}
+        .dial::after { content: ''; position: absolute; top: 50%; left: 50%; width: 10px; height: 1px; background: #000; transform-origin: left; transform: rotate(-45deg); }
+
+        .socket-face { width: 26px; height: 26px; background: #eee; border-radius: 50%; border: 1px solid #999; margin-top: 5px; position: relative; box-shadow: inset 1px 1px 2px rgba(0,0,0,0.1); }
+        .socket-hole { width: 5px; height: 5px; background: #222; border-radius: 50%; position: absolute; top: 50%; transform: translateY(-50%); }
+        
+        .ghost-slot { position: absolute; height: 110px; background: rgba(46,204,113,0.3); border: 2px dashed #27ae60; z-index: 50; display: none; border-radius: 4px;}
+        
+        /* Modal */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 3000; display: none; justify-content: center; align-items: center; }
+        .modal-overlay.active { display: flex; }
+        .modal-content { background: white; padding: 20px; border-radius: 5px; width: 320px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; font-size: 0.9rem; margin-bottom: 4px; font-weight: bold;}
+        .form-group select, .form-group input { width: 100%; padding: 6px; box-sizing: border-box; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+        .modal-btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; color: white; }
+        .confirm { background: #27ae60; } .cancel { background: #95a5a6; }
+        
+        /* Helper for schematic table generation (hidden) */
+        #schematic-container { position: absolute; top: -9999px; left: -9999px; background: white; width: 800px; padding: 20px;}
+        #schematic-table { width: 100%; border-collapse: collapse; font-family: monospace; border: 1px solid #333; }
+        #schematic-table th { background: #ccc; border: 1px solid #333; padding: 5px; }
+        #schematic-table td { border: 1px solid #333; padding: 5px; }
+
+        /* Layers Panel */
+        .layers-section {
+            background: rgba(0,0,0,0.2); 
+            padding: 10px; 
+            border-radius: 4px; 
+            margin-bottom: 10px; 
+            border: 1px solid #34495e;
+        }
+        .layers-list {
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 10px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 3px;
+            padding: 5px;
+        }
+        .layer-item {
+            display: flex;
+            align-items: center;
+            padding: 6px 8px;
+            margin-bottom: 4px;
+            background: rgba(52, 73, 94, 0.5);
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-left: 3px solid #3498db;
+        }
+        .layer-item:hover {
+            background: rgba(52, 73, 94, 0.8);
+        }
+        .layer-item.active {
+            background: rgba(26, 188, 156, 0.3);
+            border-left-color: #1abc9c;
+        }
+        .layer-item.hidden {
+            opacity: 0.5;
+        }
+        .layer-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+        .layer-name {
+            flex-grow: 1;
+            font-size: 0.8rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .layer-controls {
+            display: flex;
+            gap: 4px;
+        }
+        .layer-btn {
+            width: 18px;
+            height: 18px;
+            border-radius: 2px;
+            background: rgba(255,255,255,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .layer-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        .layer-visibility {
+            font-size: 12px;
+        }
+        .layer-visibility.hidden::before {
+            content: "👁️";
+            opacity: 0.5;
+        }
+        .layer-visibility.visible::before {
+            content: "👁️";
+        }
+        .layers-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .layer-actions {
+            display: flex;
+            gap: 5px;
+            margin-top: 10px;
+        }
+        .layer-action-btn {
+            flex: 1;
+            padding: 4px;
+            font-size: 0.7rem;
+            background: #34495e;
+            border: 1px solid #46637f;
+            color: #ccc;
+            border-radius: 3px;
+            cursor: pointer;
+            text-align: center;
+        }
+        .layer-action-btn:hover {
+            background: #1abc9c;
+            color: white;
+            border-color: #16a085;
+        }
+        .add-layer-btn {
+            width: 100%;
+            padding: 8px;
+            margin-top: 8px;
+            background: #27ae60;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            text-align: center;
+            transition: background 0.2s;
+        }
+        .add-layer-btn:hover {
+            background: #2ecc71;
+        }
+
+        /* Избранное - НОВЫЙ СТИЛЬ */
+        .favorites-section {
+            background: rgba(0,0,0,0.2);
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            border: 1px solid #34495e;
+        }
+        
+        .favorites-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .favorites-controls {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .favorite-control-btn {
+            background: #34495e;
+            border: 1px solid #46637f;
+            color: #ccc;
+            border-radius: 3px;
+            cursor: pointer;
+            padding: 3px 6px;
+            font-size: 0.7rem;
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+        
+        .favorite-control-btn:hover {
+            background: #1abc9c;
+            color: white;
+            border-color: #16a085;
+        }
+        
+        .favorites-content {
+            max-height: 250px;
+            overflow-y: auto;
+            background: rgba(255,255,255,0.05);
+            border-radius: 3px;
+            padding: 8px;
+        }
+        
+        /* Группы избранного */
+        .favorite-group {
+            margin-bottom: 12px;
+        }
+        
+        .favorite-group-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 8px;
+            background: rgba(52, 73, 94, 0.5);
+            border-radius: 3px;
+            cursor: pointer;
+            margin-bottom: 5px;
+            border-left: 3px solid #f39c12;
+        }
+        
+        .favorite-group-title {
+            font-weight: bold;
+            font-size: 0.8rem;
+            color: #f1c40f;
+        }
+        
+        .favorite-group-count {
+            background: rgba(255,255,255,0.1);
+            padding: 1px 6px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+        }
+        
+        .favorite-group-content {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+            gap: 6px;
+            padding: 5px;
+            transition: all 0.3s ease;
+        }
+        
+        .favorite-group.collapsed .favorite-group-content {
+            display: none;
+        }
+        
+        /* Плитки избранного */
+        .favorite-tile {
+            background: rgba(52, 73, 94, 0.5);
+            border-radius: 4px;
+            padding: 6px;
+            cursor: grab;
+            position: relative;
+            transition: all 0.2s;
+            border-top: 3px solid;
+            display: flex;
+            flex-direction: column;
+            min-height: 60px;
+        }
+        
+        .favorite-tile:hover {
+            background: rgba(52, 73, 94, 0.8);
+            transform: translateY(-2px);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.2);
+        }
+        
+        .favorite-tile.dragging {
+            opacity: 0.7;
+            transform: scale(0.95);
+        }
+        
+        /* Цвета для типов модулей */
+        .favorite-tile.breaker { border-top-color: #e74c3c; }
+        .favorite-tile.rcd { border-top-color: #3498db; }
+        .favorite-tile.diff { border-top-color: #c0392b; }
+        .favorite-tile.loadSwitch { border-top-color: #27ae60; }
+        .favorite-tile.spd { border-top-color: #8e44ad; }
+        .favorite-tile.rccb { border-top-color: #d35400; }
+        .favorite-tile.timeRelay { border-top-color: #9b59b6; }
+        .favorite-tile.socket { border-top-color: #f39c12; }
+        .favorite-tile.timer { border-top-color: #16a085; }
+        .favorite-tile.voltageRelay { border-top-color: #8e44ad; }
+        .favorite-tile.phaseControl { border-top-color: #d35400; }
+        .favorite-tile.phaseSelector { border-top-color: #2c3e50; }
+        .favorite-tile.counter { border-top-color: #7f8c8d; }
+        .favorite-tile.zeroBus { border-top-color: #3498db; }
+        .favorite-tile.groundBus { border-top-color: #27ae60; }
+        .favorite-tile.switch { border-top-color: #8e44ad; }
+        
+        .favorite-tile-name {
+            font-weight: bold;
+            font-size: 0.75rem;
+            color: white;
+            margin-bottom: 4px;
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .favorite-tile-params {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-bottom: 5px;
+        }
+        
+        .favorite-param {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            background: rgba(255,255,255,0.1);
+            padding: 1px 4px;
+            border-radius: 2px;
+            font-size: 0.65rem;
+            color: #bdc3c7;
+        }
+        
+        .param-icon {
+            font-size: 0.7rem;
+            opacity: 0.8;
+        }
+        
+        .favorite-tile-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: auto;
+        }
+        
+        .favorite-add-btn {
+            background: rgba(26, 188, 156, 0.3);
+            border: 1px solid rgba(26, 188, 156, 0.5);
+            color: #1abc9c;
+            border-radius: 2px;
+            padding: 1px 6px;
+            font-size: 0.65rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .favorite-add-btn:hover {
+            background: rgba(26, 188, 156, 0.6);
+            color: white;
+        }
+        
+        .favorite-remove-btn {
+            color: #e74c3c;
+            font-size: 0.8rem;
+            cursor: pointer;
+            width: 16px;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: all 0.2s;
+        }
+        
+        .favorite-remove-btn:hover {
+            background: rgba(231, 76, 60, 0.2);
+        }
+        
+        /* Пустое состояние */
+        .favorites-empty {
+            text-align: center;
+            color: #95a5a6;
+            font-size: 0.75rem;
+            padding: 20px;
+            font-style: italic;
+        }
+        
+        /* Поиск в избранном */
+        .favorites-search {
+            margin-bottom: 10px;
+            position: relative;
+        }
+        
+        .favorites-search input {
+            width: 100%;
+            padding: 6px 8px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid #46637f;
+            border-radius: 3px;
+            color: white;
+            font-size: 0.75rem;
+            outline: none;
+        }
+        
+        .favorites-search input::placeholder {
+            color: #95a5a6;
+        }
+        
+        .favorites-search-clear {
+            position: absolute;
+            right: 6px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #95a5a6;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+        
+        /* Фильтры по типу */
+        .favorites-filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-bottom: 10px;
+        }
+        
+        .favorite-filter {
+            padding: 2px 6px;
+            background: rgba(52, 73, 94, 0.5);
+            border: 1px solid #46637f;
+            border-radius: 3px;
+            font-size: 0.7rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #ccc;
+        }
+        
+        .favorite-filter:hover {
+            background: rgba(52, 73, 94, 0.8);
+        }
+        
+        .favorite-filter.active {
+            background: #1abc9c;
+            color: white;
+            border-color: #16a085;
+        }
+
+        /* Selection Rectangle */
+        .selection-rectangle {
+            position: absolute;
+            border: 2px solid #3498db;
+            background: rgba(52, 152, 219, 0.1);
+            z-index: 99;
+            pointer-events: none;
+            display: none;
+        }
+        
+        /* Group Move Indicator */
+        .group-move-indicator {
+            position: absolute;
+            background: rgba(52, 152, 219, 0.2);
+            border: 1px dashed #3498db;
+            border-radius: 4px;
+            z-index: 98;
+            pointer-events: none;
+            display: none;
+        }
+        
+        /* Индикатор перетаскивания плитки */
+        .drag-ghost {
+            position: fixed;
+            background: rgba(52, 152, 219, 0.8);
+            border: 2px solid #3498db;
+            border-radius: 4px;
+            padding: 8px;
+            z-index: 10000;
+            pointer-events: none;
+            color: white;
+            font-size: 0.8rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            transform: translate(-50%, -50%);
+            display: none;
+        }
+        
+        /* DIN Rail Settings Modal */
+        .din-rail-settings-modal .modal-content {
+            width: 350px;
+        }
+        
+        .din-rail-options {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .option-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .option-label {
+            font-weight: bold;
+            color: #2c3e50;
+            font-size: 0.9rem;
+        }
+        
+        .option-buttons {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .option-btn {
+            flex: 1;
+            padding: 10px;
+            border: 2px solid #bdc3c7;
+            border-radius: 4px;
+            background: white;
+            cursor: pointer;
+            text-align: center;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        
+        .option-btn:hover {
+            border-color: #3498db;
+            background: #f8f9fa;
+        }
+        
+        .option-btn.selected {
+            border-color: #27ae60;
+            background: #e8f6ef;
+            color: #27ae60;
+            font-weight: bold;
+        }
+        
+        .option-description {
+            font-size: 0.75rem;
+            color: #7f8c8d;
+            margin-top: 3px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="modal-overlay" id="configModal">
+    <div class="modal-content">
+        <h3 id="modalTitle" style="margin-top:0; color:#333; border:none;">Настройка</h3>
+        
+        <div id="standardFields">
+            <div class="form-group" id="polesGroup">
+                <label>Полюсы:</label>
+                <select id="polesSelect">
+                    <option value="1">1P</option>
+                    <option value="2">2P</option>
+                    <option value="3">3P</option>
+                    <option value="4">4P</option>
+                </select>
+            </div>
+            <div class="form-group" id="ampsGroup">
+                <label>Сила тока:</label>
+                <select id="ampsSelect">
+                    <option value="6A">6A</option>
+                    <option value="10A">10A</option>
+                    <option value="16A" selected>16A</option>
+                    <option value="25A">25A</option>
+                    <option value="32A">32A</option>
+                    <option value="40A">40A</option>
+                    <option value="50A">50A</option>
+                    <option value="63A">63A</option>
+                    <option value="100A">100A</option>
+                </select>
+            </div>
+            <div class="form-group" id="leakageGroup" style="display:none;">
+                <label>Ток утечки (мА):</label>
+                <select id="leakageSelect">
+                    <option value="10mA">10mA</option>
+                    <option value="30mA" selected>30mA</option>
+                    <option value="100mA">100mA</option>
+                    <option value="300mA">300mA</option>
+                </select>
+            </div>
+            
+            <!-- Дополнительные параметры для автомата -->
+            <div class="form-group" id="breakerAdditionalFields" style="display:none;">
+                <label>Ном. ток КЗ (кА):</label>
+                <select id="breakerShortCircuitSelect">
+                    <option value="4.5">4.5 кА</option>
+                    <option value="6" selected>6 кА</option>
+                    <option value="10">10 кА</option>
+                </select>
+                <label>Характеристика:</label>
+                <select id="breakerCharacteristicSelect">
+                    <option value="B">B</option>
+                    <option value="C" selected>C</option>
+                    <option value="D">D</option>
+                </select>
+            </div>
+            
+            <!-- Дополнительные параметры для УЗО -->
+            <div class="form-group" id="rcdAdditionalFields" style="display:none;">
+                <label>Тип тока утечки:</label>
+                <select id="rcdLeakageTypeSelect">
+                    <option value="AC" selected>AC</option>
+                    <option value="A">A</option>
+                </select>
+                <label>Ном. ток КЗ (кА):</label>
+                <select id="rcdShortCircuitSelect">
+                    <option value="4.5">4.5 кА</option>
+                    <option value="6" selected>6 кА</option>
+                    <option value="10">10 кА</option>
+                </select>
+            </div>
+            
+            <!-- Дополнительные параметры для диф. автомата -->
+            <div class="form-group" id="diffAdditionalFields" style="display:none;">
+                <label>Тип тока утечки:</label>
+                <select id="diffLeakageTypeSelect">
+                    <option value="AC" selected>AC</option>
+                    <option value="A">A</option>
+                </select>
+                <label>Ном. ток КЗ (кА):</label>
+                <select id="diffShortCircuitSelect">
+                    <option value="4.5">4.5 кА</option>
+                    <option value="6" selected>6 кА</option>
+                    <option value="10">10 кА</option>
+                </select>
+                <label>Характеристика:</label>
+                <select id="diffCharacteristicSelect">
+                    <option value="B">B</option>
+                    <option value="C" selected>C</option>
+                    <option value="D">D</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="busFields" style="display:none;">
+            <div class="form-group">
+                <label>Ориентация:</label>
+                <select id="busOrientation">
+                    <option value="horizontal">Горизонтальная</option>
+                    <option value="vertical">Вертикальная</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Количество подключений (4-24):</label>
+                <input type="number" id="connectionsInput" value="8" min="4" max="24">
+            </div>
+        </div>
+
+        <div id="spdFields" style="display:none;">
+            <div class="form-group">
+                <label>Полюсы УЗИП:</label>
+                <select id="spdPolesSelect">
+                    <option value="1">1P</option>
+                    <option value="2">2P</option>
+                    <option value="3">3P</option>
+                    <option value="4">4P</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Разрядный ток:</label>
+                <select id="spdCurrentSelect">
+                    <option value="5">5 кА</option>
+                    <option value="20">20 кА</option>
+                    <option value="25">25 кА</option>
+                    <option value="30" selected>30 кА</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="rccbFields" style="display:none;">
+            <div class="form-group">
+                <label>Сила тока:</label>
+                <select id="rccbAmpsSelect">
+                    <option value="25A">25A</option>
+                    <option value="32A">32A</option>
+                    <option value="40A">40A</option>
+                    <option value="50A">50A</option>
+                    <option value="63A" selected>63A</option>
+                    <option value="80A">80A</option>
+                    <option value="100A">100A</option>
+                    <option value="125A">125A</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Поля для переключателя -->
+        <div id="switchFields" style="display:none;">
+            <div class="form-group">
+                <label>Полюсы переключателя:</label>
+                <select id="switchPolesSelect">
+                    <option value="1">1P</option>
+                    <option value="2">2P</option>
+                    <option value="3">3P</option>
+                    <option value="4">4P</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Сила тока:</label>
+                <select id="switchAmpsSelect">
+                    <option value="10A">10A</option>
+                    <option value="16A" selected>16A</option>
+                    <option value="25A">25A</option>
+                    <option value="32A">32A</option>
+                    <option value="40A">40A</option>
+                    <option value="63A">63A</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="modal-actions">
+            <button class="modal-btn cancel" onclick="closeModal()">Отмена</button>
+            <button class="modal-btn confirm" onclick="confirmAddModule()">Добавить</button>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно для редактирования свойств провода -->
+<div class="modal-overlay" id="wirePropsModal">
+    <div class="modal-content wire-props-modal">
+        <h3 style="margin-top:0; color:#333; border:none;">Свойства провода</h3>
+        
+        <div class="form-group">
+            <label>Цвет провода:</label>
+            <div class="wire-props-colors" id="wirePropsColors">
+                <!-- Цвета будут добавлены динамически в 3 строки -->
+            </div>
+        </div>
+        
+        <div class="form-group">
+            <label>Сечение (мм²):</label>
+            <select id="wirePropsThickness">
+                <option value="1.5">1.5 мм²</option>
+                <option value="2.5" selected>2.5 мм²</option>
+                <option value="4.0">4.0 мм²</option>
+                <option value="6.0">6.0 мм²</option>
+                <option value="10.0">10.0 мм²</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label>Слой:</label>
+            <select id="wirePropsLayer">
+                <!-- Слои будут добавлены динамически -->
+            </select>
+        </div>
+        
+        <div class="modal-actions">
+            <button class="modal-btn cancel" onclick="closeWirePropsModal()">Отмена</button>
+            <button class="modal-btn confirm" onclick="saveWireProperties()">Сохранить</button>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно для настроек DIN рейки -->
+<div class="modal-overlay din-rail-settings-modal" id="dinRailModal">
+    <div class="modal-content">
+        <h3 style="margin-top:0; color:#333; border:none;">Настройка DIN рейки</h3>
+        
+        <div class="din-rail-options">
+            <div class="option-group">
+                <div class="option-label">Количество модулей на рейке:</div>
+                <div class="option-buttons">
+                    <button class="option-btn" data-modules="12" onclick="selectDinRailOption('modules', 12)">12 модулей</button>
+                    <button class="option-btn" data-modules="15" onclick="selectDinRailOption('modules', 15)">15 модулей</button>
+                    <button class="option-btn" data-modules="18" onclick="selectDinRailOption('modules', 18)">18 модулей</button>
+                </div>
+                <div class="option-description">Определяет ширину рейки и количество модулей, которые можно разместить</div>
+            </div>
+            
+            <div class="option-group">
+                <div class="option-label">Количество колонн:</div>
+                <div class="option-buttons">
+                    <button class="option-btn" data-columns="1" onclick="selectDinRailOption('columns', 1)">1 колонна</button>
+                    <button class="option-btn" data-columns="2" onclick="selectDinRailOption('columns', 2)">2 колонны</button>
+                </div>
+                <div class="option-description">При выборе 2 колонн рейки будут размещаться в две колонны</div>
+            </div>
+        </div>
+        
+        <div class="modal-actions">
+            <button class="modal-btn cancel" onclick="closeDinRailModal()">Отмена</button>
+            <button class="modal-btn confirm" onclick="confirmDinRailSettings()">Создать рейку</button>
+        </div>
+    </div>
+</div>
+
+<div class="container">
+    <div id="workspace">
+        <div id="main-inputs">
+            <div class="input-terminal-group grp-l1">
+                <div class="input-label">L1</div>
+                <div class="input-terminal" id="main-L1" data-type="in-src" data-tag="L1" onclick="onTerminalClick(this.id, event)"></div>
+            </div>
+            <div class="input-terminal-group grp-l2">
+                <div class="input-label">L2</div>
+                <div class="input-terminal" id="main-L2" data-type="in-src" data-tag="L2" onclick="onTerminalClick(this.id, event)"></div>
+            </div>
+            <div class="input-terminal-group grp-l3">
+                <div class="input-label">L3</div>
+                <div class="input-terminal" id="main-L3" data-type="in-src" data-tag="L3" onclick="onTerminalClick(this.id, event)"></div>
+            </div>
+            <div class="input-terminal-group grp-n">
+                <div class="input-label">N</div>
+                <div class="input-terminal" id="main-N" data-type="in-src" data-tag="N" onclick="onTerminalClick(this.id, event)"></div>
+            </div>
+            <div class="input-terminal-group grp-pe">
+                <div class="input-label">PE</div>
+                <div class="input-terminal" id="main-PE" data-type="in-src" data-tag="PE" onclick="onTerminalClick(this.id, event)"></div>
+            </div>
+        </div>
+
+        <!-- Прямоугольник выделения -->
+        <div class="selection-rectangle" id="selectionRectangle"></div>
+        
+        <!-- Индикатор группового перемещения -->
+        <div class="group-move-indicator" id="groupMoveIndicator"></div>
+
+        <svg id="wires-layer"></svg>
+        <svg id="comb-layer"></svg>
+    </div>
+
+    <div id="sidebar">
+        <h2>Щит v2.9.5</h2>
+        <div class="sidebar-content">
+            <!-- Секция слоёв -->
+            <div class="layers-section">
+                <div class="layers-header">
+                    <h3 style="margin:0; border:none;">Слои</h3>
+                </div>
+                <div class="layers-list" id="layersList">
+                    <!-- Слои будут добавляться динамически -->
+                </div>
+                <button class="add-layer-btn" onclick="addNewLayer()">
+                    + Добавить слой
+                </button>
+                <div class="layer-actions">
+                    <button class="layer-action-btn" onclick="showAllLayers()">Показать все</button>
+                    <button class="layer-action-btn" onclick="hideAllLayers()">Скрыть все</button>
+                    <button class="layer-action-btn" onclick="isolateActiveLayer()">Изолировать</button>
+                </div>
+            </div>
+
+            <!-- Секция избранного -->
+            <div class="favorites-section">
+                <div class="favorites-header">
+                    <h3 style="margin:0; border:none;">Избранное</h3>
+                    <div class="favorites-controls">
+                        <button class="favorite-control-btn" title="Свернуть все" onclick="collapseAllFavorites()">−</button>
+                        <button class="favorite-control-btn" title="Развернуть все" onclick="expandAllFavorites()">+</button>
+                    </div>
+                </div>
+                
+                <!-- Поиск в избранном -->
+                <div class="favorites-search">
+                    <input type="text" id="favoritesSearch" placeholder="Поиск в избранном..." oninput="filterFavorites()">
+                    <div class="favorites-search-clear" onclick="clearFavoritesSearch()">×</div>
+                </div>
+                
+                <!-- Фильтры по типу -->
+                <div class="favorites-filters" id="favoritesFilters">
+                    <!-- Фильтры будут добавлены динамически -->
+                </div>
+                
+                <!-- Контент избранного -->
+                <div class="favorites-content" id="favoritesContent">
+                    <!-- Группы и плитки будут добавляться динамически -->
+                </div>
+                
+                <!-- Кнопки управления -->
+                <div style="display: flex; gap: 5px; margin-top: 8px;">
+                    <button class="favorite-control-btn" style="flex: 1;" onclick="sortFavoritesByName()">
+                        <span style="font-size: 0.6rem;">A–Z</span>
+                    </button>
+                    <button class="favorite-control-btn" style="flex: 1;" onclick="sortFavoritesByType()">
+                        <span style="font-size: 0.6rem;">Тип</span>
+                    </button>
+                    <button class="favorite-control-btn" style="flex: 1;" onclick="clearAllFavorites()">
+                        <span style="font-size: 0.6rem;">Очистить</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="tools-section">
+                <div class="tool-row">
+                    <span class="tool-label">Цвет провода:</span>
+                </div>
+                <div class="color-palette">
+                    <div class="color-opt bg-red selected" onclick="setWireColor('red')" title="Фаза (Красный)"></div>
+                    <div class="color-opt bg-blue" onclick="setWireColor('blue')" title="Ноль (Синий)"></div>
+                    <div class="color-opt bg-pe" onclick="setWireColor('pe')" title="Земля (ЖЗ)"></div>
+                    <div class="color-opt bg-black-red" onclick="setWireColor('black-red')" title="Черно-Красный"></div>
+                    <div class="color-opt bg-red-black" onclick="setWireColor('red-black')" title="Красно-Черный"></div>
+                    <div class="color-opt bg-yellow" onclick="setWireColor('yellow')" title="Желтый"></div>
+                    <div class="color-opt bg-green" onclick="setWireColor('green')" title="Зеленый"></div>
+                    <div class="color-opt bg-orange" onclick="setWireColor('orange')" title="Оранжевый"></div>
+                    <div class="color-opt bg-purple" onclick="setWireColor('purple')" title="Фиолетовый"></div>
+                    <div class="color-opt bg-pink" onclick="setWireColor('pink')" title="Розовый"></div>
+                    <div class="color-opt bg-brown" onclick="setWireColor('brown')" title="Коричневый"></div>
+                    <div class="color-opt bg-gray" onclick="setWireColor('gray')" title="Серый"></div>
+                    <div class="color-opt bg-cyan" onclick="setWireColor('cyan')" title="Бирюзовый"></div>
+                    <div class="color-opt bg-blue-green" onclick="setWireColor('blue-green')" title="Сине-Зеленый"></div>
+                    <div class="color-opt bg-red-yellow" onclick="setWireColor('red-yellow')" title="Красно-Желтый"></div>
+                </div>
+                <br>
+                <div class="tool-row">
+                    <span class="tool-label">Сечение:</span>
+                    <select class="tool-select" id="wireThickness" onchange="setWireThickness(this.value)">
+                        <option value="1.5">1.5 мм²</option>
+                        <option value="2.5" selected>2.5 мм²</option>
+                        <option value="4.0">4.0 мм²</option>
+                        <option value="6.0">6.0 мм²</option>
+                        <option value="10.0">10.0 мм²</option>
+                    </select>
+                </div>
+                <div class="tool-row">
+                    <span class="tool-label">Режим:</span>
+                    <div style="display:flex; gap:5px;">
+                        <button id="mode-wire" class="mode-btn active" onclick="setWireMode('wire')">Провод</button>
+                        <button id="mode-comb" class="mode-btn" onclick="setWireMode('comb')">Гребенка</button>
+                    </div>
+                </div>
+            </div>
+
+            <h3>Автоматика</h3>
+            <div class="grid-buttons">
+                <button class="sidebar-btn" onclick="openConfigModal('breaker', 'Автомат')">Автомат</button>
+                <button class="sidebar-btn" onclick="openConfigModal('rcd', 'УЗО')">УЗО</button>
+                <button class="sidebar-btn full-width" onclick="openConfigModal('diff', 'Дифавтомат')">Дифавтомат</button>
+                <button class="sidebar-btn" onclick="openConfigModal('rccb', 'УЗПД')">УЗПД</button>
+                <button class="sidebar-btn" onclick="openConfigModal('spd', 'УЗИП')">УЗИП</button>
+                <button class="sidebar-btn" onclick="openConfigModal('switch', 'Переключатель')">Переключатель</button>
+            </div>
+
+            <h3>Коммутация</h3>
+             <div class="grid-buttons">
+                <button class="sidebar-btn" onclick="openConfigModal('loadSwitch', 'Выкл. нагр.')">Выкл. нагр.</button>
+                <button class="sidebar-btn" onclick="openConfigModal('zeroBus', 'Шина N')">Шина (N)</button>
+                <button class="sidebar-btn full-width" onclick="openConfigModal('groundBus', 'Шина PE')">Шина (PE)</button>
+             </div>
+
+            <h3>Реле и Управление</h3>
+            <div class="grid-buttons">
+                <button class="sidebar-btn" onclick="openConfigModal('timeRelay', 'Реле времени')">Реле врем.</button>
+                <button class="sidebar-btn" onclick="addDirectModule('timer')">Таймер</button>
+                <button class="sidebar-btn" onclick="addDirectModule('voltageRelay')">Реле напр.</button>
+                <button class="sidebar-btn" onclick="addDirectModule('phaseControl')">Контр. фаз</button>
+                <button class="sidebar-btn full-width" onclick="addDirectModule('phaseSelector')">Выбор фаз</button>
+            </div>
+
+            <h3>Прочее</h3>
+            <div class="grid-buttons">
+                <button class="sidebar-btn" onclick="addDinRail()">DIN Рейка</button>
+                <button class="sidebar-btn" onclick="addDirectModule('socket')">Розетка (DIN)</button>
+                <button class="sidebar-btn" onclick="addDirectModule('counter')">Счетчик</button>
+            </div>
+
+            <button class="sidebar-btn full-width" style="margin-top:15px; background:#e74c3c; font-weight:bold;" onclick="savePDF()">Экспорт PDF</button>
+        </div>
+
+        <div id="data-wrapper">
+            <div class="data-header">Смета</div>
+            <div id="data-scroll">
+                <table class="data-table" id="estimate-table"><tbody></tbody></table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="schematic-container">
+    <h2>Таблица коммутации (Схема цепи)</h2>
+    <table id="schematic-table">
+        <thead>
+            <tr>
+                <th>Источник</th>
+                <th>Провод / Шина</th>
+                <th>Потребитель / Назначение</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</div>
+
+<!-- Контекстное меню для проводов -->
+<div class="context-menu" id="wireContextMenu">
+    <div class="context-menu-item" onclick="deleteSelectedWire()">Удалить провод</div>
+    <div class="context-menu-divider"></div>
+    <div class="context-menu-item" onclick="showWirePropertiesEditor()">Изменить свойства</div>
+</div>
+
+<!-- Контекстное меню для модулей -->
+<div class="module-context-menu" id="moduleContextMenu">
+    <div class="context-menu-item" onclick="deleteSelectedModule()">Удалить модуль</div>
+    <div class="context-menu-divider"></div>
+    <div class="context-menu-item" onclick="cloneSelectedModule()">Клонировать модуль</div>
+    <div class="context-menu-item" onclick="addToFavorites()">Добавить в избранное</div>
+    <div class="context-menu-divider"></div>
+    <div class="context-menu-item" onclick="deleteSelectedModules()">Удалить выделенные модули</div>
+</div>
+
+<!-- Призрак при перетаскивании плитки -->
+<div class="drag-ghost" id="dragGhost"></div>
+
+<script>
+    // ===================== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ И КОНСТАНТЫ =====================
+    const workspace = document.getElementById('workspace');
+    const svgWires = document.getElementById('wires-layer');
+    const svgCombs = document.getElementById('comb-layer');
+    const estimateBody = document.querySelector('#estimate-table tbody');
+    const modal = document.getElementById('configModal');
+    const wirePropsModal = document.getElementById('wirePropsModal');
+    const dinRailModal = document.getElementById('dinRailModal');
+    const wireContextMenu = document.getElementById('wireContextMenu');
+    const moduleContextMenu = document.getElementById('moduleContextMenu');
+    const layersList = document.getElementById('layersList');
+    const favoritesContent = document.getElementById('favoritesContent');
+    const favoritesSearch = document.getElementById('favoritesSearch');
+    const favoritesFilters = document.getElementById('favoritesFilters');
+    const dragGhost = document.getElementById('dragGhost');
+    const selectionRectangle = document.getElementById('selectionRectangle');
+    const groupMoveIndicator = document.getElementById('groupMoveIndicator');
+    
+    const MODULE_WIDTH_PX = 40;
+    const RAIL_SPACING = 240;
+    const RAIL_PADDING = 20;
+    const MODULE_GAP = 5;
+    const COLOR_MAP = {
+        'red': '#e74c3c',
+        'blue': '#3498db',
+        'yellow': '#f1c40f',
+        'green': '#27ae60',
+        'orange': '#e67e22',
+        'purple': '#9b59b6',
+        'pink': '#e84393',
+        'brown': '#795548',
+        'gray': '#7f8c8d',
+        'cyan': '#00cec9'
+    };
+    
+    let wires = []; 
+    let uniqueIdCounter = 0;
+    let currentWireColor = 'red';
+    let currentWireMode = 'wire'; 
+    let currentWireThickness = 2.5; 
+    let wiringStartTerminal = null;
+    let activeDragWire = null;
+    let ghostWire = null;
+    
+    let isDraggingModule = false;
+    let currentDragInfo = null;
+    let ghost = null;
+    let currentModalType = null;
+    let activePivot = null;
+    let selectedWireId = null;
+    let selectedModule = null;
+    
+    let layers = [
+        { id: 'default', name: 'Основной слой', color: '#3498db', visible: true, active: true }
+    ];
+    
+    let activeLayerId = 'default';
+    
+    // Избранное
+    let favorites = [];
+    let favoriteGroups = [
+        { id: 'auto', name: 'Автоматика', collapsed: false },
+        { id: 'comm', name: 'Коммутация', collapsed: false },
+        { id: 'relay', name: 'Реле и управление', collapsed: false },
+        { id: 'other', name: 'Прочее', collapsed: false }
+    ];
+    
+    let favoritesFilter = 'all';
+    let favoritesSearchText = '';
+    
+    // Для перетаскивания плиток
+    let isDraggingFavorite = false;
+    let draggingFavorite = null;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    
+    // Переменные для группового выделения
+    let isSelecting = false;
+    let selectionStartX = 0;
+    let selectionStartY = 0;
+    let selectedModules = new Set();
+    let isGroupDragging = false;
+    let groupDragStartX = 0;
+    let groupDragStartY = 0;
+    let groupDragOffsetX = 0;
+    let groupDragOffsetY = 0;
+    let isShiftPressed = false;
+
+    // Настройки DIN реек
+    let dinRailSettings = {
+        modulesPerRail: 12, // 12, 15 или 18 модулей на рейке
+        columns: 1, // 1 или 2 колонны
+        columnWidth: 600, // Ширина колонны в пикселях
+        isFirstRailCreated: false
+    };
+
+    const moduleConfig = {
+        breaker: { name: 'Автомат', short: 'АВ', isParametric: true, hasSwitch: true, stripe: 'red', group: 'auto' },
+        loadSwitch: { name: 'Выкл. нагр.', short: 'ВН', isParametric: true, hasSwitch: true, switchColor: '#c0392b', stripe: 'green', group: 'comm' },
+        rcd: { name: 'УЗО', short: 'ВДТ', isParametric: true, hasSwitch: true, hasTest: true, testClass: 'test-gray', stripe: 'blue', hasLeakage: true, group: 'auto' },
+        diff: { name: 'Дифавтомат', short: 'АВДТ', isParametric: true, hasSwitch: true, hasTest: true, testClass: 'test-yellow', stripe: 'red', forceMinTerminals: 2, hasLeakage: true, group: 'auto' },
+        spd: { name: 'УЗИП', short: 'УЗИП', isParametric: true, stripe: 'purple', group: 'auto' },
+        rccb: { name: 'УЗПД', short: 'RCCB', isParametric: true, stripe: 'orange', group: 'auto' },
+        switch: { name: 'Переключатель', short: 'SW', isParametric: true, hasSwitch: true, switchColor: '#8e44ad', stripe: 'violet', group: 'auto' },
+        zeroBus: { name: 'Шина N', isBus: true, group: 'comm' },
+        groundBus: { name: 'Шина PE', isBus: true, group: 'comm' },
+        timeRelay: { name: 'Реле времени', short: 'РВ', width: 1, isParametric: true, hasDial: true, poles: 1, limitedAmps: ['8A', '16A'], stripe: 'purple', group: 'relay' },
+        socket: { name: 'Розетка', width: 2.5, amps: '16A', isSocket: true, poles: 2, stripe: 'yellow', group: 'other' },
+        timer: { name: 'Таймер', width: 2, amps: '16A', hasScreen: true, screenVal: '12:00', poles: 2, stripe: 'teal', group: 'relay' },
+        phaseControl: { name: 'Контроль фаз', width: 3, amps: '—', hasScreen: true, screenVal: 'ABC', poles: 3, stripe: 'orange', group: 'relay' },
+        phaseSelector: { name: 'Выбор фаз', width: 6, amps: '63A', hasScreen: true, screenVal: 'Auto', poles: 4, stripe: 'brown', group: 'relay' },
+        voltageRelay: { name: 'Реле напр.', width: 2, amps: '63A', hasScreen: true, screenVal: '220V', poles: 2, stripe: 'purple', group: 'relay' },
+        counter: { name: 'Счетчик', width: 4, amps: '—', hasScreen: true, screenVal: '0012 kW', poles: 4, stripe: 'gray', group: 'other' }
+    };
+
+    // ===================== УТИЛИТЫ =====================
+    function getUniqueId() { return 'uid-' + (uniqueIdCounter++); }
+    
+    function getTerminalTag(terminalId) {
+        const el = document.getElementById(terminalId);
+        return el ? el.dataset.tag : 'R';
+    }
+
+    function setTerminalTag(terminalId, tag) {
+        const el = document.getElementById(terminalId);
+        if (el) {
+            if (el.classList.contains('input-terminal')) return;
+            if (el.closest('.module')?.classList.contains('bus')) {
+                const module = el.closest('.module');
+                if (module.classList.contains('n-type')) tag = 'N';
+                else if (module.classList.contains('pe-type')) tag = 'PE';
+            }
+            el.dataset.tag = tag;
+        }
+    }
+
+    function getComponentName(tId) {
+        const el = document.getElementById(tId);
+        if(!el) return 'Unknown';
+        if(el.dataset.type === 'in-src') {
+            const parent = el.parentNode;
+            return `Главный Ввод (${parent.querySelector('.input-label').innerText})`;
+        }
+        const module = el.closest('.module');
+        if(module) {
+            let name = module.dataset.techName || 'Module';
+            const isTop = el.parentNode.classList.contains('top-terminals');
+            const port = isTop ? 'Вход' : 'Выход';
+            if(module.classList.contains('bus')) return name;
+            if(module.classList.contains('spd')) return `${name} [${isTop ? 'Фаза' : 'Земля'}]`;
+            return `${name} [${port}]`;
+        }
+        return 'Unknown';
+    }
+
+    function closeContextMenu(e, menu) {
+        if (!menu.contains(e.target)) {
+            menu.classList.remove('active');
+            document.removeEventListener('click', (e) => closeContextMenu(e, menu));
+        }
+    }
+
+    function isFromInputTerminal(el) {
+        return el.classList.contains('input-terminal');
+    }
+
+    // ===================== РАБОТА С ТЕГАМИ =====================
+    function propagateTagFromTerminal(terminalId, visited = new Set()) {
+        if (visited.has(terminalId)) return;
+        visited.add(terminalId);
+        
+        const sourceTag = getTerminalTag(terminalId);
+        const sourceEl = document.getElementById(terminalId);
+        const sourceType = sourceEl?.dataset.type;
+        
+        wires.forEach(wire => {
+            if (wire.from === terminalId && wire.type === 'wire') {
+                const targetId = wire.to;
+                const targetEl = document.getElementById(targetId);
+                const targetType = targetEl?.dataset.type;
+                
+                if ((sourceType === 'out' || sourceType === 'bus' || sourceType === 'in-src') && 
+                    (targetType === 'in' || targetType === 'bus')) {
+                    setTerminalTag(targetId, sourceTag);
+                    propagateTagFromTerminal(targetId, visited);
+                }
+            }
+        });
+        
+        wires.forEach(wire => {
+            if (wire.type === 'comb' && (wire.from === terminalId || wire.to === terminalId)) {
+                const otherId = wire.from === terminalId ? wire.to : wire.from;
+                const otherEl = document.getElementById(otherId);
+                if (otherEl && otherEl.dataset.type === sourceEl.dataset.type) {
+                    setTerminalTag(otherId, sourceTag);
+                    propagateTagFromTerminal(otherId, visited);
+                }
+            }
+        });
+        
+        if (sourceType === 'in' && sourceEl) {
+            const module = sourceEl.closest('.module');
+            if (module && !module.classList.contains('bus')) {
+                const terminalIndex = Array.from(module.querySelectorAll('.top-terminals .terminal')).indexOf(sourceEl);
+                if (terminalIndex !== -1) {
+                    const bottomTerminals = module.querySelectorAll('.bottom-terminals .terminal');
+                    if (bottomTerminals[terminalIndex]) {
+                        setTerminalTag(bottomTerminals[terminalIndex].id, sourceTag);
+                        propagateTagFromTerminal(bottomTerminals[terminalIndex].id, visited);
+                    }
+                }
+            }
+        }
+    }
+
+    function updateAllTags() {
+        document.querySelectorAll('.terminal:not(.input-terminal)').forEach(terminal => {
+            const module = terminal.closest('.module');
+            if (module) {
+                if (module.classList.contains('bus')) {
+                    if (module.classList.contains('n-type')) terminal.dataset.tag = 'N';
+                    else if (module.classList.contains('pe-type')) terminal.dataset.tag = 'PE';
+                    else terminal.dataset.tag = 'R';
+                } else terminal.dataset.tag = 'R';
+            }
+        });
+        
+        const fixedTerminals = ['main-L1', 'main-L2', 'main-L3', 'main-N', 'main-PE'];
+        const visited = new Set();
+        
+        fixedTerminals.forEach(terminalId => propagateTagFromTerminal(terminalId, visited));
+        document.querySelectorAll('.module.bus .terminal').forEach(terminal => propagateTagFromTerminal(terminal.id, visited));
+    }
+
+    // ===================== СОВМЕСТИМОСТЬ ТЕГОВ =====================
+    function areTagsCompatible(fromTag, toTag, fromType, toType, wireMode) {
+        if (wireMode === 'comb') return fromTag === toTag;
+        
+        if (fromType === 'in-src' || fromType === 'out' || fromType === 'bus') {
+            if (fromTag.startsWith('L')) return toTag.startsWith('L') || toTag === 'R';
+            if (fromTag === 'N') return toTag === 'N' || toTag === 'R';
+            if (fromTag === 'PE') return toTag === 'PE' || toTag === 'R';
+            if (fromTag === 'R') return true;
+        }
+        
+        if (fromType === 'in') {
+            if (fromTag.startsWith('L')) return toTag.startsWith('L') || toTag === 'R';
+            if (fromTag === 'N') return toTag === 'N' || toTag === 'R';
+            if (fromTag === 'PE') return toTag === 'PE' || toTag === 'R';
+            return true;
+        }
+        
+        return true;
+    }
+
+    // ===================== СЛОИ =====================
+    function initLayers() {
+        renderLayersList();
+        wires.forEach(wire => { if (!wire.layerId) wire.layerId = 'default'; });
+        updateWireVisibility();
+    }
+    
+    function renderLayersList() {
+        layersList.innerHTML = '';
+        layers.forEach(layer => {
+            const layerItem = document.createElement('div');
+            layerItem.className = `layer-item ${layer.active ? 'active' : ''} ${!layer.visible ? 'hidden' : ''}`;
+            layerItem.dataset.layerId = layer.id;
+            
+            layerItem.innerHTML = `
+                <div class="layer-color" style="background-color: ${layer.color}"></div>
+                <div class="layer-name" title="${layer.name}">${layer.name}</div>
+                <div class="layer-controls">
+                    <div class="layer-btn layer-visibility ${layer.visible ? 'visible' : 'hidden'}" 
+                         onclick="toggleLayerVisibility('${layer.id}', event)"></div>
+                    ${layer.id !== 'default' ? '<div class="layer-btn" onclick="deleteLayer(\'' + layer.id + '\', event)">×</div>' : ''}
+                </div>
+            `;
+            
+            layerItem.addEventListener('click', (e) => {
+                if (!e.target.classList.contains('layer-btn')) setActiveLayer(layer.id);
+            });
+            
+            layersList.appendChild(layerItem);
+        });
+    }
+    
+    function setActiveLayer(layerId) {
+        layers.forEach(layer => layer.active = (layer.id === layerId));
+        activeLayerId = layerId;
+        renderLayersList();
+        updateWireSelection();
+    }
+    
+    function toggleLayerVisibility(layerId, e) {
+        e.stopPropagation();
+        const layer = layers.find(l => l.id === layerId);
+        if (layer) {
+            layer.visible = !layer.visible;
+            renderLayersList();
+            updateWireVisibility();
+        }
+    }
+    
+    function updateWireVisibility() {
+        document.querySelectorAll('path.wire').forEach(path => {
+            const wireId = path.dataset.wireId;
+            const wire = wires.find(w => w.id === wireId);
+            if (wire) {
+                const layer = layers.find(l => l.id === wire.layerId);
+                path.style.display = (layer && layer.visible) ? 'block' : 'none';
+            }
+        });
+        
+        document.querySelectorAll('circle.pivot').forEach(circle => {
+            const wireId = circle.dataset.wireId;
+            const wire = wires.find(w => w.id === wireId);
+            if (wire) {
+                const layer = layers.find(l => l.id === wire.layerId);
+                circle.style.display = (layer && layer.visible) ? 'block' : 'none';
+            }
+        });
+    }
+    
+    function updateWireSelection() {
+        document.querySelectorAll('path.wire').forEach(path => {
+            const wireId = path.dataset.wireId;
+            const wire = wires.find(w => w.id === wireId);
+            if (wire) {
+                const baseWidth = parseFloat(path.getAttribute('stroke-width')) || 3;
+                if (wire.layerId === activeLayerId) {
+                    path.style.opacity = '1';
+                    path.style.strokeWidth = baseWidth + 'px';
+                } else {
+                    path.style.opacity = '0.3';
+                    path.style.strokeWidth = (baseWidth * 0.7) + 'px';
+                }
+            }
+        });
+    }
+    
+    function addNewLayer() {
+        const layerName = prompt('Введите название нового слоя:', 'Новый слой');
+        if (layerName) {
+            const colors = ['#e74c3c', '#3498db', '#f1c40f', '#9b59b6', '#27ae60', '#e67e22', '#1abc9c', '#34495e'];
+            const newLayer = {
+                id: 'layer-' + Date.now(),
+                name: layerName,
+                color: colors[layers.length % colors.length],
+                visible: true,
+                active: false
+            };
+            layers.push(newLayer);
+            renderLayersList();
+        }
+    }
+    
+    function deleteLayer(layerId, e) {
+        e.stopPropagation();
+        if (layerId === 'default') {
+            alert('Основной слой нельзя удалить');
+            return;
+        }
+        
+        if (confirm('Удалить слой? Все провода в этом слое будут перемещены в основной слой.')) {
+            wires.forEach(wire => { if (wire.layerId === layerId) wire.layerId = 'default'; });
+            layers = layers.filter(l => l.id !== layerId);
+            if (activeLayerId === layerId) setActiveLayer('default');
+            renderLayersList();
+            updateWireVisibility();
+            updateWireSelection();
+        }
+    }
+    
+    function showAllLayers() {
+        layers.forEach(layer => layer.visible = true);
+        renderLayersList();
+        updateWireVisibility();
+    }
+    
+    function hideAllLayers() {
+        layers.forEach(layer => { if (layer.id !== 'default') layer.visible = false; });
+        renderLayersList();
+        updateWireVisibility();
+    }
+    
+    function isolateActiveLayer() {
+        layers.forEach(layer => layer.visible = (layer.id === activeLayerId));
+        renderLayersList();
+        updateWireVisibility();
+    }
+
+    // ===================== ИЗБРАННОЕ =====================
+    function initFavorites() {
+        renderFavorites();
+        initFavoritesFilters();
+        const savedFavorites = localStorage.getItem('shieldFavorites');
+        if (savedFavorites) {
+            try {
+                favorites = JSON.parse(savedFavorites);
+                renderFavorites();
+            } catch (e) {
+                console.error('Ошибка загрузки избранного:', e);
+            }
+        }
+    }
+    
+    function saveFavorites() {
+        localStorage.setItem('shieldFavorites', JSON.stringify(favorites));
+    }
+    
+    function renderFavorites() {
+        favoritesContent.innerHTML = '';
+        if (favorites.length === 0) {
+            favoritesContent.innerHTML = '<div class="favorites-empty">Нет избранных модулей</div>';
+            return;
+        }
+        
+        let filteredFavorites = favorites;
+        if (favoritesSearchText) {
+            const searchLower = favoritesSearchText.toLowerCase();
+            filteredFavorites = filteredFavorites.filter(fav => 
+                fav.name.toLowerCase().includes(searchLower) ||
+                JSON.stringify(fav.params).toLowerCase().includes(searchLower)
+            );
+        }
+        if (favoritesFilter !== 'all') filteredFavorites = filteredFavorites.filter(fav => fav.type === favoritesFilter);
+        
+        const favoritesByGroup = {};
+        filteredFavorites.forEach(fav => {
+            const config = moduleConfig[fav.type];
+            const groupId = config ? config.group : 'other';
+            if (!favoritesByGroup[groupId]) favoritesByGroup[groupId] = [];
+            favoritesByGroup[groupId].push(fav);
+        });
+        
+        favoriteGroups.forEach(group => {
+            const groupFavorites = favoritesByGroup[group.id];
+            if (!groupFavorites || groupFavorites.length === 0) return;
+            
+            const groupElement = document.createElement('div');
+            groupElement.className = `favorite-group ${group.collapsed ? 'collapsed' : ''}`;
+            groupElement.dataset.groupId = group.id;
+            
+            groupElement.innerHTML = `
+                <div class="favorite-group-header" onclick="toggleFavoriteGroup('${group.id}')">
+                    <div class="favorite-group-title">${group.name}</div>
+                    <div class="favorite-group-count">${groupFavorites.length}</div>
+                </div>
+                <div class="favorite-group-content">
+                    ${groupFavorites.map((fav, index) => renderFavoriteTile(fav, index)).join('')}
+                </div>
+            `;
+            favoritesContent.appendChild(groupElement);
+        });
+        
+        const uncategorizedFavorites = filteredFavorites.filter(fav => {
+            const config = moduleConfig[fav.type];
+            const groupId = config ? config.group : 'other';
+            return !favoriteGroups.find(g => g.id === groupId);
+        });
+        
+        if (uncategorizedFavorites.length > 0) {
+            const groupElement = document.createElement('div');
+            groupElement.className = 'favorite-group';
+            groupElement.innerHTML = `
+                <div class="favorite-group-header" onclick="toggleFavoriteGroup('other')">
+                    <div class="favorite-group-title">Другие</div>
+                    <div class="favorite-group-count">${uncategorizedFavorites.length}</div>
+                </div>
+                <div class="favorite-group-content">
+                    ${uncategorizedFavorites.map((fav, index) => renderFavoriteTile(fav, index)).join('')}
+                </div>
+            `;
+            favoritesContent.appendChild(groupElement);
+        }
+    }
+    
+    function renderFavoriteTile(favorite, index) {
+        const config = moduleConfig[favorite.type];
+        const typeName = config ? config.name : favorite.type;
+        let tileName = typeName;
+        if (favorite.params.amps && favorite.params.amps !== '—') tileName += ` ${favorite.params.amps}`;
+        if (favorite.params.poles) tileName += ` ${favorite.params.poles}P`;
+        
+        const params = [];
+        if (favorite.params.amps && favorite.params.amps !== '—') params.push(`<span class="favorite-param"><span class="param-icon">⚡</span>${favorite.params.amps}</span>`);
+        if (favorite.params.poles) params.push(`<span class="favorite-param"><span class="param-icon">🔌</span>${favorite.params.poles}P</span>`);
+        if (favorite.params.leakage) params.push(`<span class="favorite-param"><span class="param-icon">💧</span>${favorite.params.leakage}</span>`);
+        if (favorite.params.spdCurrent) params.push(`<span class="favorite-param"><span class="param-icon">⚡</span>${favorite.params.spdCurrent}кА</span>`);
+        if (favorite.params.shortCircuit) params.push(`<span class="favorite-param"><span class="param-icon">⚠️</span>${favorite.params.shortCircuit}кА</span>`);
+        if (favorite.params.characteristic) params.push(`<span class="favorite-param"><span class="param-icon">📊</span>${favorite.params.characteristic}</span>`);
+        
+        return `
+            <div class="favorite-tile ${favorite.type}" 
+                 draggable="true"
+                 data-index="${index}"
+                 onmousedown="startDragFavorite(event, ${index})"
+                 onclick="createFromFavorite(${index})"
+                 title="${favorite.name}">
+                <div class="favorite-tile-name">${tileName}</div>
+                ${params.length > 0 ? `<div class="favorite-tile-params">${params.join('')}</div>` : ''}
+                <div class="favorite-tile-actions">
+                    <div class="favorite-add-btn" onclick="createFromFavorite(${index}, event)">Добавить</div>
+                    <div class="favorite-remove-btn" onclick="removeFromFavorites(${index}, event)">×</div>
+                </div>
+            </div>
+        `;
+    }
+    
+    function initFavoritesFilters() {
+        const filterTypes = [
+            { id: 'all', name: 'Все' },
+            { id: 'breaker', name: 'Автоматы' },
+            { id: 'rcd', name: 'УЗО' },
+            { id: 'diff', name: 'Дифавтоматы' },
+            { id: 'spd', name: 'УЗИП' },
+            { id: 'switch', name: 'Переключатели' },
+            { id: 'zeroBus', name: 'Шины N' },
+            { id: 'groundBus', name: 'Шины PE' }
+        ];
+        
+        favoritesFilters.innerHTML = filterTypes.map(filter => `
+            <div class="favorite-filter ${favoritesFilter === filter.id ? 'active' : ''}" 
+                 onclick="setFavoritesFilter('${filter.id}')">
+                ${filter.name}
+            </div>
+        `).join('');
+    }
+    
+    function setFavoritesFilter(filterId) {
+        favoritesFilter = filterId;
+        document.querySelectorAll('.favorite-filter').forEach(el => {
+            el.classList.toggle('active', el.getAttribute('onclick').includes(`'${filterId}'`));
+        });
+        renderFavorites();
+    }
+    
+    function filterFavorites() {
+        favoritesSearchText = favoritesSearch.value.toLowerCase();
+        renderFavorites();
+    }
+    
+    function clearFavoritesSearch() {
+        favoritesSearch.value = '';
+        favoritesSearchText = '';
+        renderFavorites();
+    }
+    
+    function toggleFavoriteGroup(groupId) {
+        const group = favoriteGroups.find(g => g.id === groupId);
+        if (group) group.collapsed = !group.collapsed;
+        else {
+            const groupElement = document.querySelector(`.favorite-group[data-group-id="${groupId}"]`);
+            if (groupElement) groupElement.classList.toggle('collapsed');
+        }
+        renderFavorites();
+    }
+    
+    function collapseAllFavorites() {
+        favoriteGroups.forEach(group => group.collapsed = true);
+        renderFavorites();
+    }
+    
+    function expandAllFavorites() {
+        favoriteGroups.forEach(group => group.collapsed = false);
+        renderFavorites();
+    }
+    
+    function sortFavoritesByName() {
+        favorites.sort((a, b) => a.name.localeCompare(b.name));
+        saveFavorites();
+        renderFavorites();
+    }
+    
+    function sortFavoritesByType() {
+        favorites.sort((a, b) => {
+            const typeA = moduleConfig[a.type]?.group || 'other';
+            const typeB = moduleConfig[b.type]?.group || 'other';
+            return typeA.localeCompare(typeB) || a.name.localeCompare(b.name);
+        });
+        saveFavorites();
+        renderFavorites();
+    }
+    
+    function clearAllFavorites() {
+        if (confirm('Очистить всё избранное?')) {
+            favorites = [];
+            saveFavorites();
+            renderFavorites();
+        }
+    }
+    
+    function createFromFavorite(index, event = null) {
+        if (event) event.stopPropagation();
+        const favorite = favorites[index];
+        if (!favorite) return;
+        
+        if (favorite.type === 'zeroBus' || favorite.type === 'groundBus') {
+            addModuleToWorkspace(favorite.type, { 
+                widthUnits: favorite.params.widthUnits,
+                poles: favorite.params.poles,
+                amps: '—',
+                orientation: favorite.params.orientation
+            });
+        } else if (favorite.type === 'switch') {
+        addModuleToWorkspace(favorite.type, favorite.params);
+    } else if (favorite.type === 'zeroBus' || favorite.type === 'groundBus') {
+        addModuleToWorkspace(favorite.type, { 
+            widthUnits: favorite.params.widthUnits,
+            poles: favorite.params.poles,
+            amps: '—',
+            orientation: favorite.params.orientation
+        });
+        } else {
+            addModuleToWorkspace(favorite.type, favorite.params);
+        }
+    }
+    
+    function addToFavorites() {
+        if (!selectedModule) return;
+        const mod = selectedModule;
+        const typeKey = mod.dataset.type;
+        const config = moduleConfig[typeKey];
+        
+        let favorite = null;
+        if (config.isBus) {
+            const orientation = mod.classList.contains('vertical') ? 'vertical' : 'horizontal';
+            const poles = mod.querySelectorAll('.terminal').length;
+            favorite = {
+                type: typeKey,
+                name: mod.dataset.techName || config.name,
+                params: {
+                    widthUnits: Math.max(2, Math.ceil(poles / 2)),
+                    poles: poles,
+                    amps: '—',
+                    orientation: orientation
+                }
+            };
+        } else {
+            const widthUnits = parseFloat(mod.dataset.widthUnits);
+            let poles;
+            if (typeKey === 'switch') {
+                const terminalCount = mod.querySelectorAll('.top-terminals .terminal').length;
+                poles = terminalCount / 2;
+            } else {
+                poles = mod.querySelectorAll('.top-terminals .terminal').length;
+            }
+            const amps = mod.querySelector('.label-amps')?.textContent || '16A';
+            
+            const params = { widthUnits, poles, amps };
+            
+            if (typeKey === 'rcd' || typeKey === 'diff') {
+                const leakage = mod.querySelector('.label-leakage')?.textContent || null;
+                if (leakage) params.leakage = leakage;
+            }
+            
+            if (typeKey === 'switch') {
+    const widthUnits = parseFloat(mod.dataset.widthUnits);
+    const poles = mod.querySelectorAll('.top-terminals .terminal').length / 2;
+    
+    favorite = {
+        type: typeKey,
+        name: mod.dataset.techName || config.name,
+        params: { 
+            widthUnits: widthUnits,
+            poles: poles, 
+            amps: amps 
+        }
+    };
+            } else {
+                const leakageType = mod.dataset.leakageType || null;
+                const shortCircuit = mod.dataset.shortCircuit || null;
+                const characteristic = mod.dataset.characteristic || null;
+                
+                if (leakageType) params.leakageType = leakageType;
+                if (shortCircuit) params.shortCircuit = shortCircuit;
+                if (characteristic) params.characteristic = characteristic;
+                
+                favorite = {
+                    type: typeKey,
+                    name: mod.dataset.techName || config.name,
+                    params: params
+                };
+            }
+        }
+    
+        if (favorite) {
+            const isDuplicate = favorites.some(existing => JSON.stringify(existing) === JSON.stringify(favorite));
+            if (!isDuplicate) {
+                favorites.push(favorite);
+                saveFavorites();
+                renderFavorites();
+                alert('Модуль добавлен в избранное!');
+            } else alert('Этот модуль уже в избранном!');
+        }
+        moduleContextMenu.classList.remove('active');
+    }
+    
+    function removeFromFavorites(index, e) {
+        if (e) e.stopPropagation();
+        if (confirm('Удалить из избранного?')) {
+            favorites.splice(index, 1);
+            saveFavorites();
+            renderFavorites();
+        }
+    }
+
+    // ===================== ПЕРЕТАСКИВАНИЕ ПЛИТОК =====================
+    function startDragFavorite(e, index) {
+        if (e.button !== 0) return;
+        const favorite = favorites[index];
+        if (!favorite) return;
+        
+        isDraggingFavorite = true;
+        draggingFavorite = favorite;
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+        
+        const tile = e.currentTarget;
+        tile.classList.add('dragging');
+        dragGhost.textContent = favorite.name;
+        dragGhost.style.display = 'block';
+        dragGhost.style.left = e.clientX + 'px';
+        dragGhost.style.top = e.clientY + 'px';
+        
+        document.addEventListener('mousemove', dragFavorite);
+        document.addEventListener('mouseup', stopDragFavorite);
+        e.preventDefault();
+    }
+    
+    function dragFavorite(e) {
+        if (!isDraggingFavorite) return;
+        dragGhost.style.left = e.clientX + 'px';
+        dragGhost.style.top = e.clientY + 'px';
+    }
+    
+    function stopDragFavorite(e) {
+        if (!isDraggingFavorite) return;
+        isDraggingFavorite = false;
+        dragGhost.style.display = 'none';
+        document.querySelectorAll('.favorite-tile.dragging').forEach(tile => tile.classList.remove('dragging'));
+        
+        const wr = workspace.getBoundingClientRect();
+        if (e.clientX >= wr.left && e.clientX <= wr.right && e.clientY >= wr.top && e.clientY <= wr.bottom) {
+            createFromFavorite(favorites.indexOf(draggingFavorite));
+        }
+        
+        draggingFavorite = null;
+        document.removeEventListener('mousemove', dragFavorite);
+        document.removeEventListener('mouseup', stopDragFavorite);
+    }
+
+    // ===================== ИНСТРУМЕНТЫ ПРОВОДКИ =====================
+    function setWireColor(c) {
+        currentWireColor = c;
+        document.querySelectorAll('.color-opt').forEach(el => el.classList.remove('selected'));
+        document.querySelector(`.color-opt.bg-${c}`).classList.add('selected');
+    }
+    
+    function setWireThickness(val) { currentWireThickness = parseFloat(val); }
+    
+    function setWireMode(mode) {
+        currentWireMode = mode;
+        document.getElementById('mode-wire').classList.toggle('active', mode === 'wire');
+        document.getElementById('mode-comb').classList.toggle('active', mode === 'comb');
+    }
+    
+    function highlightValidTerminals(startTerminal) {
+        const startType = startTerminal.dataset.type;
+        const startTag = getTerminalTag(startTerminal.id);
+        
+        document.querySelectorAll('.terminal, .input-terminal').forEach(t => {
+            let isValid = false;
+            const tType = t.dataset.type;
+            const tTag = getTerminalTag(t.id);
+            
+            if (currentWireMode === 'comb') {
+                isValid = (tType === startType) && (tTag === startTag);
+            } else {
+                if (startType === 'out' || startType === 'bus' || startType === 'in-src') {
+                    if (['in', 'bus'].includes(tType)) {
+                        isValid = areTagsCompatible(startTag, tTag, startType, tType, currentWireMode);
+                    }
+                } else if (startType === 'in') {
+                    if (['out', 'bus', 'in-src'].includes(tType)) {
+                        isValid = areTagsCompatible(startTag, tTag, startType, tType, currentWireMode);
+                    }
+                }
+            }
+            
+            if (isValid) {
+                t.classList.remove('invalid-connection');
+                t.classList.add('valid-connection');
+                t.style.boxShadow = '0 0 8px #2ecc71';
+                t.style.borderColor = '#27ae60';
+                t.title = `Тег: ${tTag}\nСовместимо с: ${startTag}`;
+            } else {
+                t.classList.remove('valid-connection');
+                t.classList.add('invalid-connection');
+                t.style.boxShadow = '0 0 8px #e74c3c';
+                t.style.borderColor = '#c0392b';
+                if (t !== startTerminal) t.title = `Тег: ${tTag}\nНесовместимо с: ${startTag}`;
+            }
+        });
+    }
+    
+    function resetTerminalHighlight() {
+        document.querySelectorAll('.terminal, .input-terminal').forEach(t => {
+            t.classList.remove('invalid-connection', 'valid-connection');
+            t.style.boxShadow = '';
+            t.style.borderColor = '';
+        });
+    }
+
+    // ===================== МОДАЛЬНЫЕ ОКНА =====================
+    function openConfigModal(type, title) {
+        currentModalType = type;
+        document.getElementById('modalTitle').innerText = title;
+        
+        const stdFields = document.getElementById('standardFields');
+        const busFields = document.getElementById('busFields');
+        const spdFields = document.getElementById('spdFields');
+        const rccbFields = document.getElementById('rccbFields');
+        const switchFields = document.getElementById('switchFields');
+        
+        stdFields.style.display = 'none';
+        busFields.style.display = 'none';
+        spdFields.style.display = 'none';
+        rccbFields.style.display = 'none';
+        switchFields.style.display = 'none';
+        
+        document.getElementById('breakerAdditionalFields').style.display = 'none';
+        document.getElementById('rcdAdditionalFields').style.display = 'none';
+        document.getElementById('diffAdditionalFields').style.display = 'none';
+        
+        if (type === 'spd') {
+            spdFields.style.display = 'block';
+            document.getElementById('spdPolesSelect').value = '1';
+            document.getElementById('spdCurrentSelect').value = '30';
+        } else if (type === 'rccb') {
+            rccbFields.style.display = 'block';
+            document.getElementById('rccbAmpsSelect').value = '63A';
+        } else if (type === 'zeroBus' || type === 'groundBus') {
+            busFields.style.display = 'block';
+        } else if (type === 'switch') {
+            switchFields.style.display = 'block';
+            document.getElementById('switchPolesSelect').value = '1';
+            document.getElementById('switchAmpsSelect').value = '16A';
+        } else {
+            stdFields.style.display = 'block';
+            const polesSelect = document.getElementById('polesSelect');
+            const ampsSelect = document.getElementById('ampsSelect');
+            const leakGroup = document.getElementById('leakageGroup');
+            
+            leakGroup.style.display = 'none'; 
+            Array.from(ampsSelect.options).forEach(o => o.style.display = 'block');
+            Array.from(polesSelect.options).forEach(o => o.style.display = 'block');
+            document.getElementById('polesGroup').style.display = 'block';
+            
+            if (type === 'breaker') {
+                document.getElementById('breakerAdditionalFields').style.display = 'block';
+                document.getElementById('breakerShortCircuitSelect').value = '6';
+                document.getElementById('breakerCharacteristicSelect').value = 'C';
+                polesSelect.value = '1'; 
+            } else if (type === 'rcd') {
+                document.getElementById('rcdAdditionalFields').style.display = 'block';
+                document.getElementById('rcdLeakageTypeSelect').value = 'AC';
+                document.getElementById('rcdShortCircuitSelect').value = '6';
+                leakGroup.style.display = 'block';
+                polesSelect.querySelector('option[value="1"]').style.display = 'none';
+                polesSelect.querySelector('option[value="3"]').style.display = 'none';
+                polesSelect.value = '2';
+            } else if (type === 'diff') {
+                document.getElementById('diffAdditionalFields').style.display = 'block';
+                document.getElementById('diffLeakageTypeSelect').value = 'AC';
+                document.getElementById('diffShortCircuitSelect').value = '6';
+                document.getElementById('diffCharacteristicSelect').value = 'C';
+                leakGroup.style.display = 'block';
+                polesSelect.querySelector('option[value="3"]').style.display = 'none';
+                polesSelect.value = '2';
+            } else if (type === 'timeRelay') {
+                document.getElementById('polesGroup').style.display = 'none';
+                Array.from(ampsSelect.options).forEach(o => { if(o.value !== '8A' && o.value !== '16A') o.style.display = 'none'; });
+                ampsSelect.value = '16A';
+            } else if (type === 'loadSwitch') polesSelect.value = '3'; 
+            else polesSelect.value = '1'; 
+        }
+        modal.classList.add('active');
+    }
+    
+    function closeModal() { modal.classList.remove('active'); currentModalType = null; }
+    
+    function confirmAddModule() {
+        if (!currentModalType) return;
+        
+        let width, terminals, poles, amps, busOrientation = 'horizontal';
+        let leakage = null, spdCurrent = null, rccbAmps = null;
+        let leakageType = null, shortCircuit = null, characteristic = null;
+        
+        if (currentModalType === 'zeroBus' || currentModalType === 'groundBus') {
+            let conn = parseInt(document.getElementById('connectionsInput').value);
+            if(conn < 4) conn = 4; if(conn > 24) conn = 24;
+            busOrientation = document.getElementById('busOrientation').value;
+            width = (busOrientation === 'horizontal') ? Math.max(2, Math.ceil(conn / 2)) : 1;
+            terminals = conn; poles = conn; amps = '—';
+        } else if (currentModalType === 'spd') {
+            poles = parseInt(document.getElementById('spdPolesSelect').value);
+            spdCurrent = parseInt(document.getElementById('spdCurrentSelect').value);
+            width = poles; terminals = poles; amps = `${spdCurrent}кА`;
+        } else if (currentModalType === 'rccb') {
+            rccbAmps = document.getElementById('rccbAmpsSelect').value;
+            width = 2; terminals = 2; poles = 2; amps = rccbAmps;
+        } else if (currentModalType === 'switch') {
+            poles = parseInt(document.getElementById('switchPolesSelect').value);
+            amps = document.getElementById('switchAmpsSelect').value;
+            width = poles; terminals = poles * 1;
+        } else {
+            poles = parseInt(document.getElementById('polesSelect').value);
+            amps = document.getElementById('ampsSelect').value;
+            width = poles; terminals = poles;
+            
+            if(currentModalType === 'rcd' || currentModalType === 'diff') leakage = document.getElementById('leakageSelect').value;
+            if (currentModalType === 'breaker') {
+                shortCircuit = document.getElementById('breakerShortCircuitSelect').value;
+                characteristic = document.getElementById('breakerCharacteristicSelect').value;
+            } else if (currentModalType === 'rcd') {
+                leakageType = document.getElementById('rcdLeakageTypeSelect').value;
+                shortCircuit = document.getElementById('rcdShortCircuitSelect').value;
+            } else if (currentModalType === 'diff') {
+                leakageType = document.getElementById('diffLeakageTypeSelect').value;
+                shortCircuit = document.getElementById('diffShortCircuitSelect').value;
+                characteristic = document.getElementById('diffCharacteristicSelect').value;
+            }
+            
+            if (currentModalType === 'diff' && poles === 1) { width = 1; terminals = 2; }
+            if (currentModalType === 'timeRelay') { width = 1; terminals = 1; }
+        }
+        
+        addModuleToWorkspace(currentModalType, { 
+            widthUnits: width, 
+            poles: terminals, 
+            amps, 
+            orientation: busOrientation, 
+            leakage: leakage,
+            spdCurrent: spdCurrent,
+            rccbAmps: rccbAmps,
+            leakageType: leakageType,
+            shortCircuit: shortCircuit,
+            characteristic: characteristic
+        });
+        closeModal();
+    }
+
+    // ===================== DIN РЕЙКИ - НОВЫЕ ФУНКЦИИ =====================
+    function addDinRail() {
+        const rails = document.querySelectorAll('.din-rail');
+        
+        if (rails.length === 0) {
+            openDinRailModal();
+        } else {
+            createDinRailWithCurrentSettings();
+        }
+    }
+    
+    function openDinRailModal() {
+        dinRailModal.classList.add('active');
+        
+        document.querySelectorAll('#dinRailModal .option-btn').forEach(btn => {
+            btn.classList.remove('selected');
+        });
+        
+        document.querySelector(`#dinRailModal .option-btn[data-modules="${dinRailSettings.modulesPerRail}"]`)?.classList.add('selected');
+        document.querySelector(`#dinRailModal .option-btn[data-columns="${dinRailSettings.columns}"]`)?.classList.add('selected');
+    }
+    
+    function closeDinRailModal() {
+        dinRailModal.classList.remove('active');
+    }
+    
+    function selectDinRailOption(type, value) {
+        if (type === 'modules') {
+            dinRailSettings.modulesPerRail = value;
+            document.querySelectorAll('#dinRailModal .option-btn[data-modules]').forEach(btn => {
+                btn.classList.toggle('selected', parseInt(btn.dataset.modules) === value);
+            });
+        } else if (type === 'columns') {
+            dinRailSettings.columns = value;
+            document.querySelectorAll('#dinRailModal .option-btn[data-columns]').forEach(btn => {
+                btn.classList.toggle('selected', parseInt(btn.dataset.columns) === value);
+            });
+        }
+    }
+    
+    function confirmDinRailSettings() {
+        closeDinRailModal();
+        createDinRailWithCurrentSettings();
+    }
+    
+    function createDinRailWithCurrentSettings() {
+    const rails = document.querySelectorAll('.din-rail');
+    const railsCount = rails.length;
+    
+    const railWidth = calculateRailWidth();
+    
+    for (let col = 0; col < dinRailSettings.columns; col++) {
+        const rail = document.createElement('div');
+        rail.className = 'din-rail';
+        
+        rail.style.width = railWidth + 'px';
+        rail.style.height = '160px';
+        
+        const topPosition = 200 + Math.floor(railsCount / dinRailSettings.columns) * RAIL_SPACING;
+        
+        if (dinRailSettings.columns === 1) {
+            rail.style.left = '50%';
+            rail.style.transform = 'translateX(-50%)';
+        } else {
+            // ИСПРАВЛЕНО: Рейки расходятся от центра
+            const workspaceWidth = workspace.offsetWidth;
+            const columnGap = 40; // Отступ между колоннами
+            
+            // Общая ширина всех реек в ряду
+            const totalRailsWidth = dinRailSettings.columns * railWidth + 
+                                   (dinRailSettings.columns - 1) * columnGap;
+            
+            // Начальная позиция слева (чтобы отцентрировать все рейки ряда)
+            const startLeft = (workspaceWidth - totalRailsWidth) / 2;
+            
+            // Позиция для текущей колонны
+            const leftPosition = startLeft + col * (railWidth + columnGap);
+            
+            rail.style.left = leftPosition + 'px';
+            rail.style.transform = 'none';
+        }
+        
+        rail.style.top = topPosition + 'px';
+        
+        rail.innerHTML = `
+            <div class="din-rail-metal"></div>
+            <div class="btn-delete-rail" onclick="deleteRail(this, event)">×</div>
+        `;
+        
+        rail.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            selectedModule = rail;
+            showModuleContextMenu(e);
+        });
+        
+        workspace.appendChild(rail);
+    }
+    
+    dinRailSettings.isFirstRailCreated = true;
+    resizeWorkspace();
+}
+    
+    function calculateRailWidth() {
+        const slotWidth = MODULE_WIDTH_PX + MODULE_GAP;
+        return RAIL_PADDING * 2 + dinRailSettings.modulesPerRail * slotWidth - MODULE_GAP;
+    }
+    
+    function resizeWorkspace() {
+        const rails = document.querySelectorAll('.din-rail');
+        const rows = Math.ceil(rails.length / dinRailSettings.columns);
+        const h = 200 + rows * RAIL_SPACING + 400;
+        const cur = parseInt(svgWires.style.height || 0);
+        if(h > cur) { 
+            svgWires.style.height = h + 'px'; 
+            svgCombs.style.height = h + 'px'; 
+        }
+    }
+    
+    function deleteRail(btn, e) {
+    e.stopPropagation();
+    if(confirm('Удалить рейку?')) {
+        const rail = btn.parentNode;
+        const allRails = Array.from(document.querySelectorAll('.din-rail'));
+        const idx = allRails.indexOf(rail);
+        
+        // Удаляем модули с рейки
+        rail.querySelectorAll('.module').forEach(m => deleteModule(m, false));
+        rail.remove();
+        
+        // Получаем новый массив реек после удаления
+        const remainingRails = Array.from(document.querySelectorAll('.din-rail'));
+        
+        // Перераспределяем оставшиеся рейки
+        remainingRails.forEach((remainingRail, newIndex) => {
+            const row = Math.floor(newIndex / dinRailSettings.columns);
+            const col = newIndex % dinRailSettings.columns;
+            
+            if (dinRailSettings.columns === 1) {
+                remainingRail.style.top = (200 + row * RAIL_SPACING) + 'px';
+                remainingRail.style.left = '50%';
+                remainingRail.style.transform = 'translateX(-50%)';
+            } else {
+                // Используем ту же логику позиционирования, что и при создании
+                const workspaceWidth = workspace.offsetWidth;
+                const railWidth = calculateRailWidth();
+                const columnGap = 40;
+                
+                const totalRailsWidth = dinRailSettings.columns * railWidth + 
+                                       (dinRailSettings.columns - 1) * columnGap;
+                const startLeft = (workspaceWidth - totalRailsWidth) / 2;
+                
+                // Позиция для текущей колонны в ряду
+                const leftPosition = startLeft + col * (railWidth + columnGap);
+                const topPosition = 200 + row * RAIL_SPACING;
+                
+                remainingRail.style.left = leftPosition + 'px';
+                remainingRail.style.top = topPosition + 'px';
+                remainingRail.style.transform = 'none';
+            }
+        });
+        
+        setTimeout(() => { renderWires(); updateEstimate(); }, 20);
+    }
+}
+
+function redistributeRails() {
+    const allRails = Array.from(document.querySelectorAll('.din-rail'));
+    const railWidth = calculateRailWidth();
+    const workspaceWidth = workspace.offsetWidth;
+    const columnGap = 40;
+    
+    allRails.forEach((rail, index) => {
+        const row = Math.floor(index / dinRailSettings.columns);
+        const col = index % dinRailSettings.columns;
+        
+        if (dinRailSettings.columns === 1) {
+            rail.style.top = (200 + row * RAIL_SPACING) + 'px';
+            rail.style.left = '50%';
+            rail.style.transform = 'translateX(-50%)';
+        } else {
+            const totalRailsWidth = dinRailSettings.columns * railWidth + 
+                                   (dinRailSettings.columns - 1) * columnGap;
+            const startLeft = (workspaceWidth - totalRailsWidth) / 2;
+            
+            const leftPosition = startLeft + col * (railWidth + columnGap);
+            const topPosition = 200 + row * RAIL_SPACING;
+            
+            rail.style.left = leftPosition + 'px';
+            rail.style.top = topPosition + 'px';
+            rail.style.transform = 'none';
+        }
+    });
+}
+
+    // ===================== МОДУЛИ =====================
+    function addDirectModule(type) {
+        const c = moduleConfig[type];
+        addModuleToWorkspace(type, { widthUnits: c.width, poles: c.poles, amps: c.amps });
+    }
+    
+    function addModuleToWorkspace(typeKey, params) {
+        const config = moduleConfig[typeKey];
+        const isBus = config.isBus;
+        let busClass = '';
+        if (isBus) {
+             busClass = ' bus ' + (params.orientation || 'horizontal');
+             if(typeKey === 'zeroBus') busClass += ' n-type';
+             if(typeKey === 'groundBus') busClass += ' pe-type';
+        }
+        const mod = document.createElement('div');
+        mod.className = 'module' + busClass;
+        if (typeKey === 'breaker') mod.classList.add('breaker');
+        if (typeKey === 'rcd') mod.classList.add('rcd');
+        if (typeKey === 'diff') mod.classList.add('diff');
+        if (typeKey === 'loadSwitch') mod.classList.add('loadSwitch');
+        if (typeKey === 'timeRelay') mod.classList.add('timeRelay');
+        if (typeKey === 'socket') mod.classList.add('socket');
+        if (typeKey === 'timer') mod.classList.add('timer');
+        if (typeKey === 'voltageRelay') mod.classList.add('voltageRelay');
+        if (typeKey === 'phaseControl') mod.classList.add('phaseControl');
+        if (typeKey === 'phaseSelector') mod.classList.add('phaseSelector');
+        if (typeKey === 'counter') mod.classList.add('counter');
+        if (typeKey === 'spd') mod.classList.add('spd');
+        if (typeKey === 'rccb') mod.classList.add('rccb');
+        if (typeKey === 'switch') mod.classList.add('switch');
+        
+        mod.dataset.type = typeKey;
+        mod.dataset.widthUnits = params.widthUnits;
+        
+        if (params.leakageType) mod.dataset.leakageType = params.leakageType;
+        if (params.shortCircuit) mod.dataset.shortCircuit = params.shortCircuit;
+        if (params.characteristic) mod.dataset.characteristic = params.characteristic;
+        
+        if (isBus && params.orientation === 'vertical') mod.style.height = (20 + params.poles * 14) + 'px';
+        
+        let techName = config.name;
+        if (isBus) techName += ` (${params.poles}x)`;
+        else if (params.amps && params.amps !== '—') techName += ` ${params.amps}`;
+        if (params.leakage) techName += ` ${params.leakage}`;
+        if (params.spdCurrent) techName += ` ${params.spdCurrent}кА`;
+        if (params.leakageType) techName += ` ${params.leakageType}`;
+        if (params.shortCircuit) techName += ` ${params.shortCircuit}кА`;
+        if (params.characteristic) techName += ` ${params.characteristic}`;
+        mod.dataset.techName = techName;
+        
+        mod.style.width = (params.widthUnits * MODULE_WIDTH_PX) + 'px';
+        mod.style.left = (40 + document.querySelectorAll('.module:not(.on-rail)').length * 10) + 'px';
+        mod.style.top = (workspace.scrollTop + 180) + 'px';
+        mod.innerHTML = renderModuleHTML(config, params, typeKey);
+        
+        mod.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            selectedModule = mod;
+            showModuleContextMenu(e);
+        });
+        
+        mod.addEventListener('mousedown', (e) => {
+            if (e.button === 0) {
+                if (isShiftPressed) toggleModuleSelection(mod);
+                else if (!selectedModules.has(mod)) {
+                    clearSelection();
+                    selectModule(mod);
+                }
+            }
+            startDragModule(e);
+        });
+        
+        workspace.appendChild(mod);
+        updateEstimate();
+        updateAllTags();
+    }
+    
+    function renderModuleHTML(config, params, typeKey) {
+        let html = '';
+        if (config.isBus) {
+            const tag = typeKey === 'zeroBus' ? 'N' : 'PE';
+            html += `<div class="terminals">`;
+            for(let i=0; i<params.poles; i++) {
+                const terminalId = getUniqueId();
+                html += `<div class="terminal" id="${terminalId}" data-type="bus" data-tag="${tag}" onclick="onTerminalClick(this.id, event)"></div>`;
+            }
+            html += `</div>`;
+            return html;
+        }
+        
+        if (typeKey === 'switch') {
+    html += `<div class="terminals top-terminals">`;
+    for(let i=0; i<params.poles; i++) {
+        const terminalId1 = getUniqueId();
+        const terminalId2 = getUniqueId();
+        html += `<div class="terminal" id="${terminalId1}" data-type="in" data-tag="R" onclick="onTerminalClick(this.id, event)"></div>`;
+        html += `<div class="terminal" id="${terminalId2}" data-type="in" data-tag="R" onclick="onTerminalClick(this.id, event)"></div>`;
+    }
+    html += `</div><div class="face-plate">`;
+    
+    if (config.stripe) html += `<div class="stripe ${config.stripe}"></div>`;
+    if (config.short) html += `<div class="label-type">${config.short}</div>`;
+    
+    html += `<div class="switch-label">Перекл.</div>`;
+    
+    if (params.amps && params.amps !== '—') html += `<div class="label-amps">${params.amps}</div>`;
+    if (params.poles) html += `<div class="label-leakage" style="color:#8e44ad; font-size:8px;">${params.poles}P</div>`;
+    
+    if (config.hasSwitch) html += `<div class="switch-box" style="width:${(params.widthUnits > 1)?80:60}%"><div class="switch-lever" style="background:${config.switchColor||'#333'}"></div></div>`;
+    
+    html += `</div><div class="terminals bottom-terminals">`;
+    for(let i=0; i<params.poles; i++) {
+        const terminalId1 = getUniqueId();
+        const terminalId2 = getUniqueId();
+        html += `<div class="terminal" id="${terminalId1}" data-type="out" data-tag="R" onclick="onTerminalClick(this.id, event)"></div>`;
+        html += `<div class="terminal" id="${terminalId2}" data-type="out" data-tag="R" onclick="onTerminalClick(this.id, event)"></div>`;
+    }
+    html += `</div>`;
+    return html;
+}
+        
+        html += `<div class="terminals top-terminals">`;
+        for(let i=0; i<params.poles; i++) {
+            const terminalId = getUniqueId();
+            html += `<div class="terminal" id="${terminalId}" data-type="in" data-tag="R" onclick="onTerminalClick(this.id, event)"></div>`;
+        }
+        
+        html += `</div><div class="face-plate">`;
+        if (config.stripe) html += `<div class="stripe ${config.stripe}"></div>`;
+        if (config.short) html += `<div class="label-type">${config.short}</div>`;
+        
+        if (config.name === 'УЗИП') {
+            html += `<div class="spd-icon"></div>`;
+            if (params.spdCurrent) html += `<div class="label-ka">${params.spdCurrent} кА</div>`;
+        }
+        
+        if (config.name === 'УЗПД') {
+            html += `<div class="rccb-icon"></div>`;
+            if (params.rccbAmps) html += `<div class="label-amps">${params.rccbAmps}</div>`;
+        }
+        
+        if (config.hasScreen) html += `<div class="screen">${config.screenVal}</div>`;
+        if (config.hasDial) html += `<div class="dial"></div>`;
+        if (config.isSocket) html += `<div class="socket-face"><div class="socket-hole" style="left:6px"></div><div class="socket-hole" style="right:6px"></div></div>`;
+        
+        if (params.amps && params.amps !== '—' && config.name !== 'УЗПД') html += `<div class="label-amps">${params.amps}</div>`;
+        if (params.leakage) html += `<div class="label-leakage">${params.leakage}</div>`;
+        
+        if (params.leakageType) html += `<div class="label-leakage" style="color:#3498db; font-size:7px;">${params.leakageType}</div>`;
+        if (params.shortCircuit) html += `<div class="label-leakage" style="color:#795548; font-size:7px;">${params.shortCircuit}кА</div>`;
+        if (params.characteristic) html += `<div class="label-leakage" style="color:#d35400; font-size:8px; font-weight:bold;">${params.characteristic}</div>`;
+        
+        if (config.hasTest) html += `<div class="btn-test ${config.testClass}">T</div>`;
+        if (config.hasSwitch) html += `<div class="switch-box" style="width:${(params.widthUnits > 1)?80:60}%"><div class="switch-lever" style="background:${config.switchColor||'#333'}"></div></div>`;
+        
+        html += `</div><div class="terminals bottom-terminals">`;
+        for(let i=0; i<params.poles; i++) {
+            const terminalId = getUniqueId();
+            html += `<div class="terminal" id="${terminalId}" data-type="out" data-tag="R" onclick="onTerminalClick(this.id, event)"></div>`;
+        }
+        
+        html += `</div>`;
+        return html;
+    }
+
+    // ===================== УДАЛЕНИЕ МОДУЛЕЙ =====================
+    function deleteModule(mod, updateEst = true) {
+        selectedModules.delete(mod);
+        mod.querySelectorAll('.terminal').forEach(t => wires = wires.filter(w => w.from !== t.id && w.to !== t.id));
+        mod.remove();
+        renderWires();
+        updateAllTags();
+        if(updateEst) updateEstimate();
+    }
+    
+    function deleteSelectedModule() {
+        if (selectedModule) deleteModule(selectedModule);
+        selectedModule = null;
+        moduleContextMenu.classList.remove('active');
+    }
+    
+    function deleteSelectedModules() {
+        if (selectedModules.size === 0) {
+            alert('Нет выделенных модулей для удаления');
+            return;
+        }
+        
+        if (confirm(`Удалить ${selectedModules.size} выделенных модулей?`)) {
+            const modulesToDelete = Array.from(selectedModules);
+            modulesToDelete.forEach(mod => deleteModule(mod));
+            selectedModules.clear();
+        }
+        moduleContextMenu.classList.remove('active');
+    }
+    
+    function cloneSelectedModule() {
+        if (!selectedModule) return;
+        const mod = selectedModule;
+        const typeKey = mod.dataset.type;
+        const config = moduleConfig[typeKey];
+        
+        if (config.isBus) {
+            const orientation = mod.classList.contains('vertical') ? 'vertical' : 'horizontal';
+            const poles = mod.querySelectorAll('.terminal').length;
+            addModuleToWorkspace(typeKey, { 
+                widthUnits: Math.max(2, Math.ceil(poles / 2)),
+                poles: poles,
+                amps: '—',
+                orientation: orientation
+            });
+        } else {
+            const widthUnits = parseFloat(mod.dataset.widthUnits);
+            let poles;
+            if (typeKey === 'switch') {
+                const terminalCount = mod.querySelectorAll('.top-terminals .terminal').length;
+                poles = terminalCount / 2;
+            } else {
+                poles = mod.querySelectorAll('.top-terminals .terminal').length;
+            }
+            const amps = mod.querySelector('.label-amps')?.textContent || '16A';
+            
+            const params = { widthUnits, poles, amps };
+            
+            if (typeKey === 'rcd' || typeKey === 'diff') {
+                const leakage = mod.querySelector('.label-leakage')?.textContent || null;
+                if (leakage) params.leakage = leakage;
+            }
+            
+            if (typeKey === 'switch') {
+                addModuleToWorkspace(typeKey, { poles, amps });
+            } else {
+                const leakageType = mod.dataset.leakageType || null;
+                const shortCircuit = mod.dataset.shortCircuit || null;
+                const characteristic = mod.dataset.characteristic || null;
+                
+                if (leakageType) params.leakageType = leakageType;
+                if (shortCircuit) params.shortCircuit = shortCircuit;
+                if (characteristic) params.characteristic = characteristic;
+                
+                addModuleToWorkspace(typeKey, params);
+            }
+        }
+        moduleContextMenu.classList.remove('active');
+    }
+
+    // ===================== КОНТЕКСТНЫЕ МЕНЮ =====================
+    function showModuleContextMenu(e) {
+        moduleContextMenu.style.left = e.clientX + 'px';
+        moduleContextMenu.style.top = e.clientY + 'px';
+        moduleContextMenu.classList.add('active');
+        document.addEventListener('click', (e) => closeContextMenu(e, moduleContextMenu));
+    }
+    
+    function showWireContextMenu(e, wireId) {
+        selectedWireId = wireId;
+        wireContextMenu.style.left = e.clientX + 'px';
+        wireContextMenu.style.top = e.clientY + 'px';
+        wireContextMenu.classList.add('active');
+        document.addEventListener('click', (e) => closeContextMenu(e, wireContextMenu));
+    }
+
+    // ===================== СМЕТА =====================
+    function updateEstimate() {
+        const stats = {};
+        document.querySelectorAll('.module').forEach(m => stats[m.dataset.techName] = (stats[m.dataset.techName] || 0) + 1);
+        estimateBody.innerHTML = '';
+        if (Object.keys(stats).length === 0) { 
+            estimateBody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:#999">...</td></tr>'; 
+            return; 
+        }
+        for (const [name, count] of Object.entries(stats)) {
+            estimateBody.innerHTML += `<tr><td>${name}</td><td style="text-align:center">${count}</td></tr>`;
+        }
+    }
+
+    // ===================== ПРОВОДКА =====================
+    function onTerminalClick(id, e) {
+        e.stopPropagation();
+        const el = document.getElementById(id);
+        const type = el.dataset.type;
+        const tag = getTerminalTag(id);
+        
+        if (!wiringStartTerminal) {
+            const validStart = (type === 'out' || type === 'bus' || type === 'in-src');
+            if(!validStart && currentWireMode !== 'comb') {
+                alert('Начинайте с выхода (снизу), шины или Главного Ввода');
+                return;
+            }
+            
+            wiringStartTerminal = el;
+            el.classList.add('connected', 'wiring-start');
+            highlightValidTerminals(el);
+            
+            if (currentWireMode === 'comb') return;
+            createGhostWire();
+            document.addEventListener('mousemove', updateDragWire);
+            document.addEventListener('mousedown', cancelWiring);
+        } else {
+            if(el === wiringStartTerminal) return;
+            const startTag = getTerminalTag(wiringStartTerminal.id);
+            const endTag = getTerminalTag(el.id);
+            const startType = wiringStartTerminal.dataset.type;
+            const endType = el.dataset.type;
+            
+            if (currentWireMode === 'comb') {
+                if (wiringStartTerminal.dataset.type !== type) {
+                    alert('Гребенка только для одинаковых контактов');
+                    return;
+                }
+                
+                if (startTag !== endTag) {
+                    alert(`Гребёнка: теги должны совпадать (${startTag} ≠ ${endTag})`);
+                    return;
+                }
+                
+                wires.push({ 
+                    id: getUniqueId(), 
+                    from: wiringStartTerminal.id, 
+                    to: el.id, 
+                    color: '#f39c12', 
+                    type: 'comb', 
+                    width: 7,
+                    layerId: activeLayerId 
+                });
+                updateAllTags();
+            } else {
+                const fromType = wiringStartTerminal.dataset.type;
+                const toType = el.dataset.type;
+                
+                if (!((fromType === 'out' || fromType === 'bus' || fromType === 'in-src') && (toType === 'in' || toType === 'bus'))) {
+                    alert('Провод можно тянуть только от выхода к входу');
+                    return;
+                }
+                
+                if (!areTagsCompatible(startTag, endTag, startType, endType, currentWireMode)) {
+                    let errorMsg = `Недопустимое соединение: ${startTag} → ${endTag}\n`;
+                    if (startTag.startsWith('L') && (endTag === 'N' || endTag === 'PE')) errorMsg += 'Фазу нельзя подключать к нулю или земле';
+                    else if (startTag === 'N' && (endTag.startsWith('L') || endTag === 'PE')) errorMsg += 'Ноль нельзя подключать к фазе или земле';
+                    else if (startTag === 'PE' && (endTag.startsWith('L') || endTag === 'N')) errorMsg += 'Землю нельзя подключать к фазе или нулю';
+                    else errorMsg += 'Теги несовместимы';
+                    alert(errorMsg);
+                    finishWiring(true);
+                    return;
+                }
+                
+                if (endTag === 'R') setTerminalTag(el.id, startTag);
+                
+                const existing = wires.find(w => w.from === wiringStartTerminal.id && w.type === 'wire');
+                let xRight = null, startY = null, midX = null;
+                if (existing) { 
+                    xRight = existing.xRight; 
+                    startY = existing.yBreakSrc; 
+                    midX = existing.xBreakMid; 
+                }
+                
+                wires.push({ 
+                    id: getUniqueId(), 
+                    from: wiringStartTerminal.id, 
+                    to: el.id, 
+                    color: currentWireColor, 
+                    type: 'wire', 
+                    width: currentWireThickness,
+                    xRight: xRight,
+                    yBreakSrc: startY, 
+                    xBreakMid: midX, 
+                    yBreakDest: null,
+                    layerId: activeLayerId
+                });
+                updateAllTags();
+            }
+            finishWiring();
+            renderWires();
+        }
+    }
+    
+    function createGhostWire() {
+        if (ghostWire) ghostWire.remove();
+        ghostWire = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        ghostWire.classList.add('ghost-wire');
+        svgWires.appendChild(ghostWire);
+    }
+    
+    function updateDragWire(e) {
+        if(!activeDragWire && !ghostWire) return;
+        const r1 = wiringStartTerminal.getBoundingClientRect();
+        const wr = workspace.getBoundingClientRect();
+        const x1 = r1.left + r1.width/2 - wr.left;
+        const y1 = r1.top + r1.height/2 - wr.top + workspace.scrollTop;
+        const x2 = e.clientX - wr.left;
+        const y2 = e.clientY - wr.top + workspace.scrollTop;
+        
+        if (ghostWire) ghostWire.setAttribute('d', `M ${x1} ${y1} L ${x1} ${y2} L ${x2} ${y2}`);
+        if(activeDragWire) activeDragWire.setAttribute('d', `M ${x1} ${y1} L ${x1} ${y2} L ${x2} ${y2}`);
+    }
+    
+    function cancelWiring(e) {
+        if(!e.target.classList.contains('terminal') && !e.target.classList.contains('input-terminal')) finishWiring(true);
+    }
+    
+    function finishWiring(cancel=false) {
+        if(wiringStartTerminal && cancel) wiringStartTerminal.classList.remove('connected', 'wiring-start'); 
+        wiringStartTerminal = null;
+        if(activeDragWire) activeDragWire.remove();
+        activeDragWire = null;
+        if(ghostWire) { ghostWire.remove(); ghostWire = null; }
+        resetTerminalHighlight();
+        document.removeEventListener('mousemove', updateDragWire);
+        document.removeEventListener('mousedown', cancelWiring);
+    }
+
+    // ===================== ОТРИСОВКА ПРОВОДОВ =====================
+    function renderWires() {
+        svgWires.innerHTML = '';
+        svgCombs.innerHTML = '';
+        
+        document.querySelectorAll('.terminal, .input-terminal').forEach(t => {
+            t.classList.remove('connected');
+            if(!t.classList.contains('input-terminal')) {
+                 t.style.backgroundColor = ''; 
+                 t.style.borderColor = '';
+            }
+        });
+        
+        const wr = workspace.getBoundingClientRect();
+        
+        wires.forEach((w) => {
+            const el1 = document.getElementById(w.from);
+            const el2 = document.getElementById(w.to);
+            if(!el1 || !el2) return;
+            
+            if(w.type === 'wire') {
+                const hex = w.color === 'pe' ? '#2ecc71' : 
+                           w.color === 'green' ? '#27ae60' :
+                           COLOR_MAP[w.color] || '#555';
+                
+                if(!el1.classList.contains('input-terminal')) { 
+                    el1.style.backgroundColor = hex; 
+                    el1.style.borderColor = hex; 
+                }
+                if(!el2.classList.contains('input-terminal')) { 
+                    el2.style.backgroundColor = hex; 
+                    el2.style.borderColor = hex;
+                }
+            }
+            
+            el1.classList.add('connected');
+            el2.classList.add('connected');
+            
+            const r1 = el1.getBoundingClientRect();
+            const r2 = el2.getBoundingClientRect();
+            const x1 = r1.left + r1.width/2 - wr.left;
+            const y1 = r1.top + r1.height/2 - wr.top + workspace.scrollTop;
+            const x2 = r2.left + r2.width/2 - wr.left;
+            const y2 = r2.top + r2.height/2 - wr.top + workspace.scrollTop;
+            
+            if (w.type === 'comb') {
+                const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                p.setAttribute('d', `M ${x1} ${y1} L ${x2} ${y2}`);
+                p.setAttribute('stroke', '#e67e22');
+                p.setAttribute('stroke-width', 7);
+                p.classList.add('wire', 'comb');
+                p.dataset.wireId = w.id;
+                
+                p.onclick = () => { 
+                    selectedWireId = w.id;
+                    showWireContextMenu(event, w.id); 
+                };
+                p.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    selectedWireId = w.id;
+                    showWireContextMenu(e, w.id);
+                });
+                p.addEventListener('mouseenter', (e) => showWireTooltip(e, w));
+                p.addEventListener('mouseleave', hideWireTooltip);
+                
+                svgCombs.appendChild(p);
+            } else {
+                const isFromInput = isFromInputTerminal(el1);
+                if (isFromInput && w.xRight === null) w.xRight = x1 + 100;
+                if (!isFromInput && w.yBreakSrc === null) {
+                    w.yBreakSrc = Math.max(y1, y2) + 60;
+                    w.xBreakMid = (x1 + x2) / 2;
+                    w.yBreakDest = Math.min(y1, y2) - 40;
+                }
+                
+                let d;
+                if (isFromInput) d = `M ${x1} ${y1} L ${w.xRight} ${y1} L ${w.xRight} ${y2} L ${x2} ${y2}`;
+                else d = `M ${x1} ${y1} L ${x1} ${w.yBreakSrc} L ${w.xBreakMid} ${w.yBreakSrc} L ${w.xBreakMid} ${w.yBreakDest} L ${x2} ${w.yBreakDest} L ${x2} ${y2}`;
+                
+                const createPath = (c, sw, strokeDasharray = 'none') => {
+                    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                    p.setAttribute('d', d);
+                    p.setAttribute('stroke', c);
+                    p.setAttribute('stroke-width', sw);
+                    if (strokeDasharray !== 'none') p.setAttribute('stroke-dasharray', strokeDasharray);
+                    p.classList.add('wire');
+                    p.dataset.wireId = w.id;
+                    
+                    p.onclick = (e) => { 
+                        if(e.target.tagName !== 'circle') { 
+                            selectedWireId = w.id;
+                            showWireContextMenu(e, w.id); 
+                        } 
+                    };
+                    p.addEventListener('contextmenu', (e) => {
+                        e.preventDefault();
+                        selectedWireId = w.id;
+                        showWireContextMenu(e, w.id);
+                    });
+                    p.addEventListener('mouseenter', (e) => showWireTooltip(e, w));
+                    p.addEventListener('mouseleave', hideWireTooltip);
+                    
+                    svgWires.appendChild(p);
+                    return p;
+                };
+                
+                let sw = (w.width <= 1.5) ? 2 : (w.width <= 2.5 ? 3 : (w.width <= 4 ? 4 : 5));
+                
+                if (w.color === 'black-red') {
+                    createPath('#2c3e50', sw);
+                    createPath('#c0392b', sw/3, '2,2');
+                } else if (w.color === 'red-black') {
+                    createPath('#c0392b', sw);
+                    createPath('#2c3e50', sw/3, '2,2');
+                } else if (w.color === 'blue-green') {
+                    createPath('#3498db', sw);
+                    createPath('#27ae60', sw/3, '2,2');
+                } else if (w.color === 'red-yellow') {
+                    createPath('#e74c3c', sw);
+                    createPath('#f1c40f', sw/3, '2,2');
+                } else if (w.color === 'gray') {
+                    createPath('#7f8c8d', sw);
+                    createPath('#ffffff', sw/3, '2,2');
+                } else if (w.color === 'pe') {
+                    createPath('#2ecc71', sw);
+                    createPath('#f1c40f', sw/3, '2,2');
+                } else {
+                    const hex = COLOR_MAP[w.color] || '#e74c3c';
+                    createPath(hex, sw);
+                }
+                
+                createControlPoints(w, el1, el2, x1, y1, x2, y2, isFromInput);
+            }
+        });
+        
+        updateWireVisibility();
+        updateWireSelection();
+    }
+
+    function createControlPoints(wire, el1, el2, x1, y1, x2, y2, isFromInput) {
+        const createControlPoint = (cx, cy, i, c, tooltip) => {
+            const circ = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circ.setAttribute('cx', cx);
+            circ.setAttribute('cy', cy);
+            circ.setAttribute('r', isFromInput ? 4 : 3);
+            circ.classList.add('pivot', c);
+            circ.setAttribute('data-tooltip', tooltip);
+            circ.dataset.wireId = wire.id;
+            circ.dataset.pointIndex = i;
+            circ.addEventListener('mousedown', (e) => startDragPivot(e, wire.id, i));
+            circ.addEventListener('mouseenter', (e) => showPivotTooltip(e, tooltip));
+            circ.addEventListener('mouseleave', hideWireTooltip);
+            svgWires.appendChild(circ);
+        };
+        
+        if (isFromInput) {
+            createControlPoint(wire.xRight, y1, 1, 'p-corner', 'Переместить точку перехода');
+        } else {
+            createControlPoint(x1, wire.yBreakSrc, 1, 'p-vertical', 'Переместить вертикаль от источника');
+            createControlPoint(wire.xBreakMid, wire.yBreakSrc, 2, 'p-corner', 'Переместить угол (источник)');
+            createControlPoint(wire.xBreakMid, wire.yBreakDest, 3, 'p-corner', 'Переместить угол (назначение)');
+            createControlPoint(x2, wire.yBreakDest, 4, 'p-vertical', 'Переместить вертикаль к назначению');
+        }
+    }
+
+    // ===================== ТУЛТИПЫ =====================
+    function showWireTooltip(e, wire) {
+        hideWireTooltip();
+        const tooltip = document.createElement('div');
+        tooltip.className = 'wire-tooltip';
+        tooltip.id = 'wire-tooltip';
+        
+        const fromName = getComponentName(wire.from);
+        const toName = getComponentName(wire.to);
+        const wireType = wire.type === 'comb' ? 'Гребенка' : 'Провод';
+        const wireInfo = wire.type === 'comb' ? '' : `${wire.width}мм²`;
+        const layerName = layers.find(l => l.id === wire.layerId)?.name || 'Без слоя';
+        const fromTag = getTerminalTag(wire.from);
+        const toTag = getTerminalTag(wire.to);
+        
+        tooltip.innerHTML = `
+            <div class="wire-title">${wireType}</div>
+            <div><strong>От:</strong> ${fromName} [${fromTag}]</div>
+            <div><strong>К:</strong> ${toName} [${toTag}]</div>
+            ${wireInfo ? `<div><strong>Сечение:</strong> ${wireInfo}</div>` : ''}
+            <div><strong>Цвет:</strong> ${wire.color}</div>
+            <div><strong>Слой:</strong> ${layerName}</div>
+        `;
+        
+        document.body.appendChild(tooltip);
+        const x = e.clientX + 15, y = e.clientY + 15;
+        tooltip.style.left = x + 'px';
+        tooltip.style.top = y + 'px';
+    }
+    
+    function showPivotTooltip(e, text) {
+        hideWireTooltip();
+        const tooltip = document.createElement('div');
+        tooltip.className = 'wire-tooltip';
+        tooltip.id = 'wire-tooltip';
+        tooltip.textContent = text;
+        document.body.appendChild(tooltip);
+        const x = e.clientX + 15, y = e.clientY + 15;
+        tooltip.style.left = x + 'px';
+        tooltip.style.top = y + 'px';
+    }
+    
+    function hideWireTooltip() {
+        const tooltip = document.getElementById('wire-tooltip');
+        if (tooltip) tooltip.remove();
+    }
+
+    // ===================== УДАЛЕНИЕ ПРОВОДОВ =====================
+    function deleteSelectedWire() {
+        if (selectedWireId) {
+            const wire = wires.find(w => w.id === selectedWireId);
+            if (wire) {
+                wires = wires.filter(w => w.id !== selectedWireId);
+                if (wire.type === 'wire') {
+                    const fromEl = document.getElementById(wire.from);
+                    const toEl = document.getElementById(wire.to);
+                    if (fromEl && toEl) {
+                        const fromType = fromEl.dataset.type;
+                        const toType = toEl.dataset.type;
+                        if ((fromType === 'out' || fromType === 'bus' || fromType === 'in-src') && (toType === 'in' || toType === 'bus')) {
+                            setTerminalTag(wire.to, 'R');
+                        }
+                    }
+                }
+                updateAllTags();
+            }
+            renderWires();
+            selectedWireId = null;
+        }
+        wireContextMenu.classList.remove('active');
+    }
+
+    // ===================== ПЕРЕТАСКИВАНИЕ ТОЧЕК ПРОВОДА =====================
+    function startDragPivot(e, wireId, pointIndex) {
+        e.stopPropagation(); e.preventDefault();
+        activePivot = { wireId, pointIndex };
+        createGhostWire();
+        document.addEventListener('mousemove', dragPivot);
+        document.addEventListener('mouseup', stopDragPivot);
+    }
+    
+    function dragPivot(e) {
+        if (!activePivot) return;
+        const wr = workspace.getBoundingClientRect();
+        const mx = e.clientX - wr.left;
+        const my = e.clientY - wr.top + workspace.scrollTop;
+        const wire = wires.find(w => w.id === activePivot.wireId);
+        
+        if (wire) {
+            const el1 = document.getElementById(wire.from);
+            const el2 = document.getElementById(wire.to);
+            const isFromInput = isFromInputTerminal(el1);
+            
+            if (isFromInput) {
+                if (activePivot.pointIndex === 1) wire.xRight = mx;
+            } else {
+                const siblings = (activePivot.pointIndex <= 2) 
+                    ? wires.filter(w => w.from === wire.from && w.type === 'wire')
+                    : [wire]; 
+                
+                siblings.forEach(sib => {
+                     if (activePivot.pointIndex === 1) sib.yBreakSrc = my;
+                     if (activePivot.pointIndex === 2) { sib.xBreakMid = mx; sib.yBreakSrc = my; }
+                });
+                if (activePivot.pointIndex === 3) { wire.xBreakMid = mx; wire.yBreakDest = my; }
+                if (activePivot.pointIndex === 4) wire.yBreakDest = my;
+            }
+            
+            if(el1 && el2 && ghostWire) {
+                const r1 = el1.getBoundingClientRect();
+                const r2 = el2.getBoundingClientRect();
+                const x1 = r1.left + r1.width/2 - wr.left;
+                const y1 = r1.top + r1.height/2 - wr.top + workspace.scrollTop;
+                const x2 = r2.left + r2.width/2 - wr.left;
+                const y2 = r2.top + r2.height/2 - wr.top + workspace.scrollTop;
+                
+                let d;
+                if (isFromInput) d = `M ${x1} ${y1} L ${wire.xRight} ${y1} L ${wire.xRight} ${y2} L ${x2} ${y2}`;
+                else d = `M ${x1} ${y1} L ${x1} ${wire.yBreakSrc} L ${wire.xBreakMid} ${wire.yBreakSrc} L ${wire.xBreakMid} ${wire.yBreakDest} L ${x2} ${wire.yBreakDest} L ${x2} ${y2}`;
+                ghostWire.setAttribute('d', d);
+            }
+            
+            renderWires();
+        }
+    }
+    
+    function stopDragPivot() {
+        activePivot = null;
+        if(ghostWire) { ghostWire.remove(); ghostWire = null; }
+        document.removeEventListener('mousemove', dragPivot);
+        document.removeEventListener('mouseup', stopDragPivot);
+    }
+
+    // ===================== ПЕРЕТАСКИВАНИЕ МОДУЛЕЙ =====================
+    function startDragModule(e) {
+        if(e.button !== 0 || e.target.classList.contains('terminal') || e.target.classList.contains('switch-lever')) return;
+        const el = e.currentTarget;
+        
+        if (selectedModules.size > 0 && selectedModules.has(el)) {
+            isGroupDragging = true;
+            const rect = el.getBoundingClientRect();
+            const wr = workspace.getBoundingClientRect();
+            
+            groupDragStartX = e.clientX;
+            groupDragStartY = e.clientY;
+            groupDragOffsetX = e.clientX - rect.left;
+            groupDragOffsetY = e.clientY - rect.top;
+            
+            updateGroupMoveIndicator();
+            e.preventDefault();
+            return;
+        }
+        
+        isDraggingModule = true;
+        const rect = el.getBoundingClientRect();
+        
+        if (el.parentNode.classList.contains('din-rail')) {
+             const rr = el.parentNode.getBoundingClientRect();
+             const wr = workspace.getBoundingClientRect();
+             el.style.left = (rr.left - wr.left + el.offsetLeft) + 'px';
+             el.style.top = (rr.top - wr.top + el.offsetTop + workspace.scrollTop) + 'px';
+             el.classList.remove('on-rail');
+             workspace.appendChild(el);
+        }
+        currentDragInfo = { el, offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top };
+        
+        if(!ghost) { ghost = document.createElement('div'); ghost.className = 'ghost-slot'; workspace.appendChild(ghost); }
+    }
+
+    // ===================== ГРУППОВОЕ ВЫДЕЛЕНИЕ =====================
+    function startSelection(e) {
+        if (e.button !== 0 || e.target.closest('#main-inputs')) return;
+        if (e.target.classList.contains('terminal') || e.target.classList.contains('input-terminal')) return;
+        if (e.target.closest('.module')) return;
+        
+        isSelecting = true;
+        selectionStartX = e.clientX;
+        selectionStartY = e.clientY;
+        
+        const wr = workspace.getBoundingClientRect();
+        selectionRectangle.style.left = (selectionStartX - wr.left) + 'px';
+        selectionRectangle.style.top = (selectionStartY - wr.top + workspace.scrollTop) + 'px';
+        selectionRectangle.style.width = '0';
+        selectionRectangle.style.height = '0';
+        selectionRectangle.style.display = 'block';
+        
+        document.addEventListener('mousemove', updateSelection);
+        document.addEventListener('mouseup', endSelection);
+        
+        if (!isShiftPressed) clearSelection();
+    }
+    
+    function updateSelection(e) {
+        if (!isSelecting) return;
+        const wr = workspace.getBoundingClientRect();
+        const currentX = e.clientX;
+        const currentY = e.clientY;
+        
+        const left = Math.min(selectionStartX, currentX) - wr.left;
+        const top = Math.min(selectionStartY, currentY) - wr.top + workspace.scrollTop;
+        const width = Math.abs(currentX - selectionStartX);
+        const height = Math.abs(currentY - selectionStartY);
+        
+        selectionRectangle.style.left = left + 'px';
+        selectionRectangle.style.top = top + 'px';
+        selectionRectangle.style.width = width + 'px';
+        selectionRectangle.style.height = height + 'px';
+        
+        updateSelectedModulesInRectangle(left, top, width, height);
+    }
+    
+    function endSelection(e) {
+        if (!isSelecting) return;
+        isSelecting = false;
+        selectionRectangle.style.display = 'none';
+        document.removeEventListener('mousemove', updateSelection);
+        document.removeEventListener('mouseup', endSelection);
+    }
+    
+    function updateSelectedModulesInRectangle(left, top, width, height) {
+        const wr = workspace.getBoundingClientRect();
+        
+        document.querySelectorAll('.module').forEach(mod => {
+            const rect = mod.getBoundingClientRect();
+            const modLeft = rect.left - wr.left;
+            const modTop = rect.top - wr.top + workspace.scrollTop;
+            const modRight = modLeft + rect.width;
+            const modBottom = modTop + rect.height;
+            
+            if (modLeft < left + width && modRight > left && modTop < top + height && modBottom > top) {
+                if (!isShiftPressed || !selectedModules.has(mod)) selectModule(mod);
+            } else {
+                if (!isShiftPressed) deselectModule(mod);
+            }
+        });
+    }
+    
+    function selectModule(mod) {
+        if (!selectedModules.has(mod)) {
+            mod.classList.add('selected');
+            selectedModules.add(mod);
+        }
+    }
+    
+    function deselectModule(mod) {
+        if (selectedModules.has(mod)) {
+            mod.classList.remove('selected');
+            selectedModules.delete(mod);
+        }
+    }
+    
+    function toggleModuleSelection(mod) {
+        if (selectedModules.has(mod)) deselectModule(mod);
+        else selectModule(mod);
+    }
+    
+    function clearSelection() {
+        selectedModules.forEach(mod => mod.classList.remove('selected'));
+        selectedModules.clear();
+    }
+
+    // ===================== ГРУППОВОЕ ПЕРЕМЕЩЕНИЕ =====================
+    function startGroupDrag(e) {
+        if (!isGroupDragging) return;
+        const wr = workspace.getBoundingClientRect();
+        const currentX = e.clientX;
+        const currentY = e.clientY;
+        
+        const deltaX = currentX - groupDragStartX;
+        const deltaY = currentY - groupDragStartY;
+        
+        selectedModules.forEach(mod => {
+            const currentLeft = parseInt(mod.style.left) || 0;
+            const currentTop = parseInt(mod.style.top) || 0;
+            mod.style.left = (currentLeft + deltaX) + 'px';
+            mod.style.top = (currentTop + deltaY) + 'px';
+        });
+        
+        updateGroupMoveIndicator();
+        groupDragStartX = currentX;
+        groupDragStartY = currentY;
+        renderWires();
+    }
+    
+    function updateGroupMoveIndicator() {
+        if (selectedModules.size === 0) {
+            groupMoveIndicator.style.display = 'none';
+            return;
+        }
+        
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        
+        selectedModules.forEach(mod => {
+            const rect = mod.getBoundingClientRect();
+            const wr = workspace.getBoundingClientRect();
+            const left = rect.left - wr.left;
+            const top = rect.top - wr.top + workspace.scrollTop;
+            const right = left + rect.width;
+            const bottom = top + rect.height;
+            
+            minX = Math.min(minX, left);
+            minY = Math.min(minY, top);
+            maxX = Math.max(maxX, right);
+            maxY = Math.max(maxY, bottom);
+        });
+        
+        groupMoveIndicator.style.left = minX + 'px';
+        groupMoveIndicator.style.top = minY + 'px';
+        groupMoveIndicator.style.width = (maxX - minX) + 'px';
+        groupMoveIndicator.style.height = (maxY - minY) + 'px';
+        groupMoveIndicator.style.display = 'block';
+    }
+    
+    function endGroupDrag() {
+        if (!isGroupDragging) return;
+        isGroupDragging = false;
+        groupMoveIndicator.style.display = 'none';
+        selectedModules.forEach(mod => {
+            if (!mod.classList.contains('bus') && !mod.classList.contains('vertical')) checkSnapToRail(mod);
+        });
+    }
+    
+    function checkSnapToRail(mod) {
+    const rect = mod.getBoundingClientRect();
+    const wr = workspace.getBoundingClientRect();
+    const modX = rect.left + rect.width / 2;
+    const modY = rect.top + rect.height / 2;
+    
+    let snapped = false;
+    
+    document.querySelectorAll('.din-rail').forEach(rail => {
+        const rr = rail.getBoundingClientRect();
+        if(modX > rr.left && modX < rr.right && modY > rr.top - 20 && modY < rr.bottom + 20) {
+            const relX = modX - rr.left - RAIL_PADDING;
+            const slotWidth = MODULE_WIDTH_PX + MODULE_GAP;
+            let slot = Math.round(relX / slotWidth);
+            const w = parseFloat(mod.dataset.widthUnits);
+            if(slot < 0) slot = 0;
+            
+            const maxSlots = dinRailSettings.modulesPerRail;
+            if(slot + w > maxSlots) slot = maxSlots - w;
+            
+            const hasCollision = Array.from(rail.querySelectorAll('.module')).some(m => {
+                if(m === mod) return false;
+                const ms = parseFloat(m.dataset.slot);
+                const mw = parseFloat(m.dataset.widthUnits);
+                return (slot < ms + mw && slot + w > ms);
+            });
+            
+            if(!hasCollision) {
+                mod.style.left = (RAIL_PADDING + slot * slotWidth) + 'px';
+                mod.style.top = '15px';
+                mod.classList.add('on-rail');
+                mod.dataset.slot = slot;
+                rail.appendChild(mod);
+                snapped = true;
+            }
+        }
+    });
+    
+    return snapped;
+}
+
+    // ===================== РЕДАКТИРОВАНИЕ СВОЙСТВ ПРОВОДА =====================
+    function showWirePropertiesEditor() {
+        if (!selectedWireId) return;
+        
+        const wire = wires.find(w => w.id === selectedWireId);
+        if (!wire) return;
+        
+        const colorsContainer = document.getElementById('wirePropsColors');
+        colorsContainer.innerHTML = '';
+        
+        const colorMatrix = [
+            [
+                {id: 'red', name: 'Фаза (Красный)'},
+                {id: 'blue', name: 'Ноль (Синий)'},
+                {id: 'pe', name: 'Земля (ЖЗ)'},
+                {id: 'black-red', name: 'Черно-Красный'},
+                {id: 'red-black', name: 'Красно-Черный'}
+            ],
+            [
+                {id: 'yellow', name: 'Желтый'},
+                {id: 'green', name: 'Зеленый'},
+                {id: 'orange', name: 'Оранжевый'},
+                {id: 'purple', name: 'Фиолетовый'},
+                {id: 'pink', name: 'Розовый'}
+            ],
+            [
+                {id: 'brown', name: 'Коричневый'},
+                {id: 'gray', name: 'Серый'},
+                {id: 'cyan', name: 'Бирюзовый'},
+                {id: 'blue-green', name: 'Сине-Зеленый'},
+                {id: 'red-yellow', name: 'Красно-Желтый'}
+            ]
+        ];
+        
+        colorMatrix.forEach((rowColors, rowIndex) => {
+            const rowDiv = document.createElement('div');
+            rowDiv.style.display = 'flex';
+            rowDiv.style.justifyContent = 'space-between';
+            rowDiv.style.marginBottom = rowIndex < 2 ? '8px' : '0';
+            rowDiv.style.width = '100%';
+            
+            rowColors.forEach(colorOpt => {
+                const colorDiv = document.createElement('div');
+                colorDiv.className = `color-opt bg-${colorOpt.id} ${wire.color === colorOpt.id ? 'selected' : ''}`;
+                colorDiv.title = colorOpt.name;
+                colorDiv.onclick = () => {
+                    document.querySelectorAll('#wirePropsColors .color-opt').forEach(el => el.classList.remove('selected'));
+                    colorDiv.classList.add('selected');
+                };
+                rowDiv.appendChild(colorDiv);
+            });
+            
+            colorsContainer.appendChild(rowDiv);
+        });
+        
+        document.getElementById('wirePropsThickness').value = wire.width.toString();
+        
+        const layerSelect = document.getElementById('wirePropsLayer');
+        layerSelect.innerHTML = '';
+        layers.forEach(layer => {
+            const option = document.createElement('option');
+            option.value = layer.id;
+            option.textContent = layer.name;
+            option.selected = wire.layerId === layer.id;
+            layerSelect.appendChild(option);
+        });
+        
+        wirePropsModal.classList.add('active');
+        wireContextMenu.classList.remove('active');
+    }
+    
+    function saveWireProperties() {
+        if (!selectedWireId) return;
+        
+        const wire = wires.find(w => w.id === selectedWireId);
+        if (!wire) return;
+        
+        const selectedColor = document.querySelector('#wirePropsColors .color-opt.selected');
+        if (selectedColor) {
+            const colorClass = Array.from(selectedColor.classList).find(cls => cls.startsWith('bg-'));
+            if (colorClass) {
+                wire.color = colorClass.replace('bg-', '');
+            }
+        }
+        
+        const newThickness = parseFloat(document.getElementById('wirePropsThickness').value);
+        if (newThickness) {
+            wire.width = newThickness;
+        }
+        
+        const newLayerId = document.getElementById('wirePropsLayer').value;
+        if (newLayerId) {
+            wire.layerId = newLayerId;
+        }
+        
+        renderWires();
+        closeWirePropsModal();
+    }
+    
+    function closeWirePropsModal() {
+        wirePropsModal.classList.remove('active');
+    }
+
+    // ===================== ОБРАБОТЧИКИ СОБЫТИЙ =====================
+    workspace.addEventListener('mousedown', (e) => {
+        if (e.button === 0 && !e.target.closest('.module')) startSelection(e);
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+        if (isGroupDragging) startGroupDrag(e);
+        else if (isDraggingModule) {
+            const { el, offsetX, offsetY } = currentDragInfo;
+            const wr = workspace.getBoundingClientRect();
+            el.style.left = (e.clientX - wr.left - offsetX) + 'px';
+            el.style.top = (e.clientY - wr.top - offsetY + workspace.scrollTop) + 'px';
+            renderWires(); 
+            
+            let snapped = false;
+            if (!el.classList.contains('bus') && !el.classList.contains('vertical')) {
+                document.querySelectorAll('.din-rail').forEach(rail => {
+                    const rr = rail.getBoundingClientRect();
+                    if(e.clientX > rr.left && e.clientX < rr.right && e.clientY > rr.top - 20 && e.clientY < rr.bottom + 20) {
+                        const relX = e.clientX - rr.left - RAIL_PADDING;
+                        let slot = Math.round(relX / (MODULE_WIDTH_PX + MODULE_GAP));
+                        const w = parseFloat(el.dataset.widthUnits);
+                        if(slot < 0) slot = 0;
+                        if(slot + w > dinRailSettings.modulesPerRail) slot = dinRailSettings.modulesPerRail - w;
+                        
+                        const hasCollision = Array.from(rail.querySelectorAll('.module')).some(m => {
+                            if(m === el) return false;
+                            const ms = parseFloat(m.dataset.slot);
+                            const mw = parseFloat(m.dataset.widthUnits);
+                            return (slot < ms + mw && slot + w > ms);
+                        });
+                        
+                        if(!hasCollision) {
+                            ghost.style.display = 'block';
+                            ghost.style.width = (w * MODULE_WIDTH_PX) + 'px';
+                            ghost.style.left = (rr.left - wr.left + RAIL_PADDING + slot * (MODULE_WIDTH_PX + MODULE_GAP)) + 'px';
+                            ghost.style.top = (rr.top - wr.top + 15 + workspace.scrollTop) + 'px';
+                            currentDragInfo.targetRail = rail;
+                            currentDragInfo.targetSlot = slot;
+                            snapped = true;
+                        }
+                    }
+                });
+            }
+            if(!snapped) { ghost.style.display = 'none'; currentDragInfo.targetRail = null; }
+        }
+    });
+    
+    document.addEventListener('mouseup', (e) => {
+        if (isGroupDragging) endGroupDrag();
+        else if (isDraggingModule) {
+            isDraggingModule = false;
+            ghost.style.display = 'none';
+            if(currentDragInfo.targetRail) {
+                const { el, targetRail, targetSlot } = currentDragInfo;
+                el.style.left = (RAIL_PADDING + targetSlot * (MODULE_WIDTH_PX + MODULE_GAP)) + 'px';
+                el.style.top = '15px';
+                el.classList.add('on-rail');
+                el.dataset.slot = targetSlot;
+                targetRail.appendChild(el);
+            }
+            renderWires();
+            currentDragInfo = null;
+        }
+    });
+    
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Shift') isShiftPressed = true;
+        if (e.key === 'Escape') {
+            wireContextMenu.classList.remove('active');
+            moduleContextMenu.classList.remove('active');
+            wirePropsModal.classList.remove('active');
+            clearSelection();
+        }
+        if (e.key === 'Delete' && selectedModules.size > 0) deleteSelectedModules();
+    });
+    
+    document.addEventListener('keyup', (e) => {
+        if (e.key === 'Shift') isShiftPressed = false;
+    });
+
+    // ===================== ЭКСПОРТ PDF =====================
+    async function savePDF() {
+        workspace.style.backgroundImage = 'none';
+        document.querySelectorAll('.pivot').forEach(p => p.style.display = 'none');
+        
+        const canvasScheme = await html2canvas(workspace, { scale: 2, windowHeight: workspace.scrollHeight });
+        
+        const schemaTbody = document.querySelector('#schematic-table tbody');
+        schemaTbody.innerHTML = '';
+        if(wires.length === 0) {
+            schemaTbody.innerHTML = '<tr><td colspan="3">Нет соединений</td></tr>';
+        } else {
+            wires.forEach(w => {
+                const row = document.createElement('tr');
+                const fromName = getComponentName(w.from);
+                const toName = getComponentName(w.to);
+                const fromTag = getTerminalTag(w.from);
+                const toTag = getTerminalTag(w.to);
+                const wireInfo = (w.type === 'comb') ? 'Гребенка' : `Провод ${w.width}мм² (${w.color})`;
+                const layerName = layers.find(l => l.id === w.layerId)?.name || '';
+                row.innerHTML = `<td>${fromName} [${fromTag}]</td><td>${wireInfo}${layerName ? ` [${layerName}]` : ''}</td><td>${toName} [${toTag}]</td>`;
+                schemaTbody.appendChild(row);
+            });
+        }
+        const canvasSchematic = await html2canvas(document.getElementById('schematic-table'), { scale: 2 });
+        const canvasTable = await html2canvas(document.getElementById('estimate-table'), { scale: 2, backgroundColor: '#ffffff' });
+        
+        document.querySelectorAll('.pivot').forEach(p => p.style.display = 'block');
+        workspace.style.backgroundImage = '';
+        
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('landscape');
+        const pdfW = doc.internal.pageSize.getWidth();
+        const pdfH = doc.internal.pageSize.getHeight();
+        
+        const imgScheme = canvasScheme.toDataURL('image/png');
+        const schemeH = (canvasScheme.height * pdfW) / canvasScheme.width;
+        if (schemeH > pdfH) { const ratio = pdfH / schemeH; doc.addImage(imgScheme, 'PNG', 0, 0, pdfW * ratio, pdfH); } 
+        else doc.addImage(imgScheme, 'PNG', 0, 0, pdfW, schemeH);
+        
+        doc.addPage();
+        doc.setFontSize(16);
+        doc.text('Таблица коммутации (Схема цепи)', 14, 20);
+        const imgSch = canvasSchematic.toDataURL('image/png');
+        const schH = (canvasSchematic.height * 190) / canvasSchematic.width;
+        doc.addImage(imgSch, 'PNG', 14, 30, 190, schH);
+        
+        doc.addPage();
+        doc.text('Смета материалов', 14, 20);
+        const imgTable = canvasTable.toDataURL('image/png');
+        const tablePdfW = 180; 
+        const tablePdfH = (canvasTable.height * tablePdfW) / canvasTable.width;
+        doc.addImage(imgTable, 'PNG', 14, 30, tablePdfW, tablePdfH);
+        
+        doc.save('shield_v23.2.pdf');
+    }
+
+    // ===================== ИНИЦИАЛИЗАЦИЯ =====================
+    window.addEventListener('DOMContentLoaded', () => {
+        // Рейка НЕ создается при запуске
+        // Настройки DIN реек по умолчанию
+        dinRailSettings.modulesPerRail = 12;
+        dinRailSettings.columns = 1;
+        dinRailSettings.columnWidth = 600;
+        dinRailSettings.isFirstRailCreated = false;
+        
+        initLayers();
+        initFavorites();
+        
+        setTimeout(() => {
+            updateAllTags();
+        }, 100);
+    });
+</script>
+</body>
+</html>
