@@ -285,7 +285,8 @@
       border-radius: 16px;
       box-shadow: var(--shadow);
       overflow: hidden;
-      min-height: calc(100vh - 32px);
+      height: calc(100vh - 32px);
+      min-height: 700px;
       display: flex;
       flex-direction: column;
     }
@@ -299,6 +300,7 @@
       gap: 10px;
       justify-content: space-between;
       background: #fff;
+      flex: 0 0 auto;
     }
 
     .map-header h2 {
@@ -329,15 +331,16 @@
 
     .map-widget-wrap {
       flex: 1;
-      min-height: 700px;
+      min-height: 0;
       background: #eef2f7;
       position: relative;
+      overflow: hidden;
     }
 
     .map-widget {
       width: 100%;
       height: 100%;
-      min-height: 700px;
+      min-height: 0;
       background: #eef2f7;
     }
 
@@ -347,6 +350,7 @@
       font-size: 12px;
       color: var(--muted);
       background: #fff;
+      flex: 0 0 auto;
     }
 
     @media (max-width: 1200px) {
@@ -361,11 +365,11 @@
 
       .map-panel {
         width: 100%;
+        height: auto;
         min-height: 600px;
       }
 
-      .map-widget-wrap,
-      .map-widget {
+      .map-widget-wrap {
         min-height: 600px;
       }
     }
@@ -381,8 +385,7 @@
         position: static;
       }
 
-      .map-widget-wrap,
-      .map-widget {
+      .map-widget-wrap {
         min-height: 500px;
       }
     }
@@ -433,7 +436,6 @@
     <section class="map-panel">
       <div class="map-header">
         <h2>Карта</h2>
-
         <div class="tabs">
           <button class="tab active" data-city="MSK">МСК</button>
           <button class="tab" data-city="SPB">СПБ</button>
@@ -468,6 +470,8 @@
 
     let items = [];
     let selectedEquipment = new Set();
+    let currentMapCity = 'MSK';
+    let resizeTimer = null;
 
     const mapLinks = {
       MSK: {
@@ -629,21 +633,38 @@
       resetBtn.disabled = !enabled;
     }
 
+    function getMapHeight() {
+      const panel = document.querySelector('.map-panel');
+      const header = document.querySelector('.map-header');
+      const footer = document.querySelector('.map-footer');
+
+      const panelHeight = panel ? panel.clientHeight : 700;
+      const headerHeight = header ? header.offsetHeight : 60;
+      const footerHeight = footer ? footer.offsetHeight : 36;
+
+      const height = panelHeight - headerHeight - footerHeight;
+      return Math.max(500, height);
+    }
+
     function loadYandexConstructorMap(cityKey) {
       const map = mapLinks[cityKey];
       if (!map) return;
 
+      currentMapCity = cityKey;
       mapWidget.innerHTML = '';
 
       const script = document.createElement('script');
       script.type = 'text/javascript';
       script.charset = 'utf-8';
       script.async = true;
+
+      const mapHeight = getMapHeight();
+
       script.src =
         'https://api-maps.yandex.ru/services/constructor/1.0/js/' +
         '?um=' + map.um +
         '&width=100%25' +
-        '&height=100%25' +
+        '&height=' + mapHeight +
         '&lang=ru_RU' +
         '&scroll=true';
 
@@ -654,6 +675,13 @@
       tabs.forEach(tab => {
         tab.classList.toggle('active', tab.dataset.city === cityKey);
       });
+    }
+
+    function debounceReloadMap() {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        loadYandexConstructorMap(currentMapCity);
+      }, 200);
     }
 
     tabs.forEach(tab => {
@@ -692,7 +720,9 @@
     applyBtn.addEventListener('click', renderList);
     resetBtn.addEventListener('click', resetFilters);
 
-    // стартовая инициализация
+    window.addEventListener('resize', debounceReloadMap);
+
+    // Инициализация
     setButtonsEnabled(false);
     loadYandexConstructorMap('MSK');
   </script>
