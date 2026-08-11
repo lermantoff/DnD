@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Фильтр + Карта</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --bg: #f6f7fb;
+      --panel: #ffffff;
+      --border: #e4e7ef;
+      --text: #1f2430;
+      --muted: #667085;
+      --accent: #2563eb;
+      --accent-2: #dbeafe;
+      --shadow: 0 10px 30px rgba(16, 24, 40, 0.08);
+      --code-bg: #e0f2fe;
+      --code-text: #075985;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .page {
+      min-height: 100vh;
+      padding: 16px;
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+      justify-content: flex-start;
+    }
+
+    /* Левая рабочая зона — не более 40% */
+    .workspace {
+      width: 100%;
+      max-width: 40vw;
+      min-width: 320px;
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .sidebar {
+      width: 240px;
+      min-width: 240px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      padding: 16px;
+      position: sticky;
+      top: 16px;
+    }
+
+    .sidebar h1 {
+      font-size: 18px;
+      margin: 0 0 12px;
+    }
+
+    .upload {
+      margin-bottom: 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .upload label {
+      display: block;
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .upload input[type="file"] {
+      width: 100%;
+      padding: 10px;
+      border: 1px dashed #cbd5e1;
+      border-radius: 10px;
+      background: #fafafa;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: 10px 12px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: 0.15s ease;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+    }
+
+    .btn-secondary {
+      background: #eef2ff;
+      color: #3730a3;
+    }
+
+    .btn-primary:hover,
+    .btn-secondary:hover {
+      opacity: 0.92;
+    }
+
+    .filter-group {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      background: #fff;
+    }
+
+    .filter-group h2 {
+      font-size: 14px;
+      margin: 0 0 10px;
+      color: #111827;
+    }
+
+    .filter-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 280px;
+      overflow: auto;
+      padding-right: 4px;
+    }
+
+    .filter-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      font-size: 13px;
+      line-height: 1.35;
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    .filter-item input {
+      margin-top: 2px;
+      flex: 0 0 auto;
+    }
+
+    .content {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .results-wrap {
+      width: 100%;
+    }
+
+    .results-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .results-head h2 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .counter {
+      font-size: 13px;
+      color: var(--muted);
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 6px 10px;
+      white-space: nowrap;
+    }
+
+    .list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      padding: 12px 14px;
+      position: relative;
+      cursor: default;
+      transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-1px);
+      border-color: #c7d2fe;
+      box-shadow: 0 12px 28px rgba(37, 99, 235, 0.12);
+    }
+
+    .title-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+
+    .code {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 8px;
+      border-radius: 8px;
+      background: var(--code-bg);
+      color: var(--code-text);
+      font-weight: 800;
+      font-size: 13px;
+      letter-spacing: .2px;
+      flex: 0 0 auto;
+    }
+
+    .title {
+      font-size: 14px;
+      line-height: 1.45;
+      font-weight: 600;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .tooltip {
+      position: fixed;
+      z-index: 9999;
+      max-width: 360px;
+      background: #111827;
+      color: white;
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.45;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.22);
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity .12s ease, transform .12s ease;
+      white-space: pre-wrap;
+    }
+
+    .tooltip.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .empty {
+      background: white;
+      border: 1px dashed #cbd5e1;
+      border-radius: 14px;
+      padding: 24px;
+      color: var(--muted);
+      text-align: center;
+      box-shadow: var(--shadow);
+    }
+
+    .hint {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 8px;
+      line-height: 1.4;
+    }
+
+    /* Правая панель карты */
+    .map-panel {
+      flex: 1;
+      min-width: 0;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      min-height: calc(100vh - 32px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .map-header {
+      padding: 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      justify-content: space-between;
+      background: #fff;
+    }
+
+    .map-header h2 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .tab {
+      border: 1px solid var(--border);
+      background: #fff;
+      color: #111827;
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-weight: 700;
+    }
+
+    .tab.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    .map-frame-wrap {
+      flex: 1;
+      min-height: 700px;
+      background: #eef2f7;
+    }
+
+    .map-frame {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      display: block;
+      min-height: 700px;
+      background: #eef2f7;
+    }
+
+    .map-footer {
+      padding: 10px 14px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--muted);
+      background: #fff;
+    }
+
+    @media (max-width: 1200px) {
+      .page {
+        flex-direction: column;
+      }
+
+      .workspace {
+        max-width: 100%;
+        width: 100%;
+      }
+
+      .map-panel {
+        width: 100%;
+        min-height: 600px;
+      }
+    }
+
+    @media (max-width: 900px) {
+      .workspace {
+        flex-direction: column;
+      }
+
+      .sidebar {
+        width: 100%;
+        min-width: 0;
+        position: static;
+      }
+
+      .map-frame-wrap,
+      .map-frame {
+        min-height: 500px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <!-- Левая часть -->
+    <div class="workspace">
+      <aside class="sidebar">
+        <h1>Фильтр</h1>
+
+        <div class="upload">
+          <label for="fileInput">Загрузите Excel-файл (.xlsx)</label>
+          <input id="fileInput" type="file" accept=".xlsx,.xls" />
+
+          <div class="btn-row">
+            <button class="btn-primary" id="applyBtn" disabled>Применить</button>
+            <button class="btn-secondary" id="resetBtn" disabled>Сбросить</button>
+          </div>
+
+          <div class="hint">
+            Используется только колонка E — <b>Оборудование</b>.<br>
+            Отображение: A — код, B — название, C — аннотация.
+          </div>
+        </div>
+
+        <div class="filter-group">
+          <h2>Оборудование (колонка E)</h2>
+          <div class="filter-list" id="filters"></div>
+        </div>
+      </aside>
+
+      <main class="content">
+        <div class="results-wrap">
+          <div class="results-head">
+            <h2>Позиции</h2>
+            <div class="counter" id="counter">0</div>
+          </div>
+          <div class="list" id="list">
+            <div class="empty">Загрузите Excel-файл, чтобы увидеть список.</div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- Правая часть: карта -->
+    <section class="map-panel">
+      <div class="map-header">
+        <h2>Карта</h2>
+        <div class="tabs">
+          <button class="tab active" data-city="MSK">МСК</button>
+          <button class="tab" data-city="SPB">СПБ</button>
+          <button class="tab" data-city="EKB">ЕКБ</button>
+        </div>
+      </div>
+
+      <div class="map-frame-wrap">
+        <iframe
+          id="mapFrame"
+          class="map-frame"
+          src="https://yandex.ru/maps/10715/aprelevka/?ll=37.032172%2C55.533987&mode=usermaps&source=constructorLink&um=constructor%3A8295bdcbeecf3e8d0e76ad432e58a6d22e41258d88274ec6e194b34ffdc62d6a&z=8"
+          allowfullscreen
+          loading="lazy"
+        ></iframe>
+      </div>
+
+      <div class="map-footer" id="mapFooter">
+        Открыта карта: МСК
+      </div>
+    </section>
+  </div>
+
+  <div class="tooltip" id="tooltip"></div>
+
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const filtersEl = document.getElementById('filters');
+    const listEl = document.getElementById('list');
+    const counterEl = document.getElementById('counter');
+    const applyBtn = document.getElementById('applyBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const tooltip = document.getElementById('tooltip');
+    const mapFrame = document.getElementById('mapFrame');
+    const mapFooter = document.getElementById('mapFooter');
+    const tabs = document.querySelectorAll('.tab');
+
+    let items = [];
+    let selectedEquipment = new Set();
+
+    const mapLinks = {
+      MSK: {
+        title: 'МСК',
+        url: 'https://yandex.ru/maps/10715/aprelevka/?ll=37.032172%2C55.533987&mode=usermaps&source=constructorLink&um=constructor%3A8295bdcbeecf3e8d0e76ad432e58a6d22e41258d88274ec6e194b34ffdc62d6a&z=8'
+      },
+      SPB: {
+        title: 'СПБ',
+        url: 'https://yandex.ru/maps/2/saint-petersburg/?ll=30.132506%2C59.970240&mode=usermaps&source=constructorLink&um=constructor%3Af03dbf89d34bdd131d7b43863d259c253aec81acf7f8007491c3bea017c14f19&z=8'
+      },
+      EKB: {
+        title: 'ЕКБ',
+        url: 'https://yandex.ru/maps/54/yekaterinburg/?ll=60.902653%2C56.782144&mode=usermaps&source=constructorLink&um=constructor%3A10f3e0f619824ddbbf4a7fb4f36fa3d330ebdbcec5a70d7b104eadcf2f3fae8d&z=8'
+      }
+    };
+
+    function escapeHtml(str) {
+      return String(str ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;');
+    }
+
+    function splitValues(v) {
+      if (v === null || v === undefined || v === '') return [];
+      return String(v)
+        .replace(/\u00A0/g, ' ')
+        .split(/[,;]+/g)
+        .map(s => s.trim())
+        .filter(Boolean);
+    }
+
+    function uniqSorted(arr) {
+      return [...new Set(arr.map(x => String(x).trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, 'ru', { sensitivity: 'base' }));
+    }
+
+    function normalizeText(v) {
+      return String(v ?? '')
+        .replace(/\u00A0/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+    }
+
+    function buildItemsFromSheet(rows) {
+      const result = [];
+
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i] || [];
+
+        const code = row[0];       // A
+        const title = row[1];      // B
+        const annotation = row[2]; // C
+        const equipment = row[4];  // E
+
+        if ((code === undefined || code === null || String(code).trim() === '') && !title) continue;
+
+        result.push({
+          code: String(code ?? '').trim(),
+          title: String(title ?? '').trim(),
+          annotation: annotation ? String(annotation).trim() : '',
+          equipment: splitValues(equipment)
+        });
+      }
+
+      return result;
+    }
+
+    function renderFilters() {
+      const values = uniqSorted(items.flatMap(item => item.equipment));
+
+      filtersEl.innerHTML = values.length
+        ? values.map(v => `
+            <label class="filter-item">
+              <input type="checkbox" value="${escapeHtml(v)}" />
+              <span>${escapeHtml(v)}</span>
+            </label>
+          `).join('')
+        : `<div class="hint">Нет значений в колонке E.</div>`;
+
+      filtersEl.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', () => {
+          if (cb.checked) selectedEquipment.add(cb.value);
+          else selectedEquipment.delete(cb.value);
+          renderList();
+        });
+      });
+    }
+
+    function renderList() {
+      const filtered = items.filter(item => {
+        if (selectedEquipment.size === 0) return true;
+
+        const itemValues = item.equipment.map(normalizeText);
+        const selectedValues = [...selectedEquipment].map(normalizeText);
+
+        return selectedValues.some(sel =>
+          itemValues.some(v => v === sel || v.includes(sel) || sel.includes(v))
+        );
+      });
+
+      counterEl.textContent = `Показано: ${filtered.length} из ${items.length}`;
+
+      if (!filtered.length) {
+        listEl.innerHTML = `<div class="empty">Ничего не найдено по выбранному оборудованию.</div>`;
+        return;
+      }
+
+      listEl.innerHTML = filtered.map(item => `
+        <div class="card" data-annotation="${escapeHtml(item.annotation || 'Нет аннотации')}">
+          <div class="title-row">
+            <span class="code">${escapeHtml(item.code)}</span>
+            <div class="title">${escapeHtml(item.title)}</div>
+          </div>
+        </div>
+      `).join('');
+
+      listEl.querySelectorAll('.card').forEach(card => {
+        const text = card.dataset.annotation || 'Нет аннотации';
+
+        card.addEventListener('mouseenter', () => {
+          tooltip.textContent = text;
+          tooltip.classList.add('show');
+        });
+
+        card.addEventListener('mousemove', (e) => {
+          const gap = 14;
+          const rect = tooltip.getBoundingClientRect();
+          let x = e.clientX + gap;
+          let y = e.clientY + gap;
+
+          if (x + rect.width > window.innerWidth - 8) {
+            x = e.clientX - rect.width - gap;
+          }
+          if (y + rect.height > window.innerHeight - 8) {
+            y = e.clientY - rect.height - gap;
+          }
+
+          tooltip.style.left = x + 'px';
+          tooltip.style.top = y + 'px';
+        });
+
+        card.addEventListener('mouseleave', () => {
+          tooltip.classList.remove('show');
+        });
+      });
+    }
+
+    function resetFilters() {
+      selectedEquipment.clear();
+      filtersEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+      renderList();
+    }
+
+    function setButtonsEnabled(enabled) {
+      applyBtn.disabled = !enabled;
+      resetBtn.disabled = !enabled;
+    }
+
+    function setMap(cityKey) {
+      const map = mapLinks[cityKey];
+      if (!map) return;
+
+      mapFrame.src = map.url;
+      mapFooter.textContent = `Открыта карта: ${map.title}`;
+
+      tabs.forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.city === cityKey);
+      });
+    }
+
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        setMap(tab.dataset.city);
+      });
+    });
+
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+
+      reader.onload = (e) => {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+
+        const rows = XLSX.utils.sheet_to_json(sheet, {
+          header: 1,
+          defval: ''
+        });
+
+        items = buildItemsFromSheet(rows);
+
+        renderFilters();
+        renderList();
+        setButtonsEnabled(true);
+      };
+
+      reader.readAsArrayBuffer(file);
+    });
+
+    applyBtn.addEventListener('click', renderList);
+    resetBtn.addEventListener('click', resetFilters);
+
+    // стартовая инициализация
+    setButtonsEnabled(false);
+    setMap('MSK');
+  </script>
+</body>
+</html>
