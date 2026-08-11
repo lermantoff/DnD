@@ -3,8 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Фильтр + Карта</title>
+  <title>Фильтр + Карта + Адрес</title>
+
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU&apikey=YOUR_YANDEX_API_KEY"></script>
+
   <style>
     :root {
       --bg: #f6f7fb;
@@ -38,7 +41,6 @@
       justify-content: flex-start;
     }
 
-    /* Левая рабочая зона — не более 40% */
     .workspace {
       width: 100%;
       max-width: 40vw;
@@ -329,6 +331,31 @@
       border-color: var(--accent);
     }
 
+    .map-controls {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      background: #fff;
+      flex-wrap: wrap;
+    }
+
+    .map-controls input {
+      flex: 1;
+      min-width: 220px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      outline: none;
+      font-size: 14px;
+    }
+
+    .map-controls input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+    }
+
     .map-widget-wrap {
       flex: 1;
       min-height: 0;
@@ -388,6 +415,10 @@
       .map-widget-wrap {
         min-height: 500px;
       }
+
+      .map-controls input {
+        min-width: 100%;
+      }
     }
   </style>
 </head>
@@ -436,11 +467,18 @@
     <section class="map-panel">
       <div class="map-header">
         <h2>Карта</h2>
+
         <div class="tabs">
           <button class="tab active" data-city="MSK">МСК</button>
           <button class="tab" data-city="SPB">СПБ</button>
           <button class="tab" data-city="EKB">ЕКБ</button>
         </div>
+      </div>
+
+      <div class="map-controls">
+        <input id="addressInput" type="text" placeholder="Введите адрес, например: Москва, Тверская 7" />
+        <button class="btn-primary" id="searchAddressBtn">Найти адрес</button>
+        <button class="btn-secondary" id="clearMarkerBtn">Снять метку</button>
       </div>
 
       <div class="map-widget-wrap">
@@ -464,27 +502,36 @@
     const resetBtn = document.getElementById('resetBtn');
     const tooltip = document.getElementById('tooltip');
 
-    const mapWidget = document.getElementById('mapWidget');
     const mapFooter = document.getElementById('mapFooter');
     const tabs = document.querySelectorAll('.tab');
+    const addressInput = document.getElementById('addressInput');
+    const searchAddressBtn = document.getElementById('searchAddressBtn');
+    const clearMarkerBtn = document.getElementById('clearMarkerBtn');
+    const mapWidget = document.getElementById('mapWidget');
 
     let items = [];
     let selectedEquipment = new Set();
+
+    let map = null;
+    let placemark = null;
     let currentMapCity = 'MSK';
     let resizeTimer = null;
 
-    const mapLinks = {
+    const cityConfig = {
       MSK: {
         title: 'МСК',
-        um: 'constructor%3A8295bdcbeecf3e8d0e76ad432e58a6d22e41258d88274ec6e194b34ffdc62d6a'
+        center: [55.751244, 37.618423],
+        zoom: 10
       },
       SPB: {
         title: 'СПБ',
-        um: 'constructor%3Af03dbf89d34bdd131d7b43863d259c253aec81acf7f8007491c3bea017c14f19'
+        center: [59.9342802, 30.3350986],
+        zoom: 10
       },
       EKB: {
         title: 'ЕКБ',
-        um: 'constructor%3A10f3e0f619824ddbbf4a7fb4f36fa3d330ebdbcec5a70d7b104eadcf2f3fae8d'
+        center: [56.8389261, 60.6057025],
+        zoom: 10
       }
     };
 
@@ -633,61 +680,107 @@
       resetBtn.disabled = !enabled;
     }
 
-    function getMapHeight() {
-      const panel = document.querySelector('.map-panel');
-      const header = document.querySelector('.map-header');
-      const footer = document.querySelector('.map-footer');
+    function initMap() {
+      const cfg = cityConfig[currentMapCity];
 
-      const panelHeight = panel ? panel.clientHeight : 700;
-      const headerHeight = header ? header.offsetHeight : 60;
-      const footerHeight = footer ? footer.offsetHeight : 36;
+      map = new ymaps.Map('mapWidget', {
+        center: cfg.center,
+        zoom: cfg.zoom,
+        controls: ['zoomControl']
+      });
 
-      const height = panelHeight - headerHeight - footerHeight;
-      return Math.max(500, height);
+      map.controls.add('searchControl', {
+        float: 'right',
+        provider: 'yandex#search'
+      });
+
+      mapFooter.textContent = `Открыта карта: ${cfg.title}`;
     }
 
-    function loadYandexConstructorMap(cityKey) {
-      const map = mapLinks[cityKey];
+    function clearPlacemark() {
+      if (placemark && map) {
+        map.geoObjects.remove(placemark);
+        placemark = null;
+      }
+    }
+
+    function searchAddress() {
       if (!map) return;
 
+      const address = addressInput.value.trim();
+      if (!address) return;
+
+      ymaps.geocode(address, {
+        results: 1
+      }).then(res => {
+        const firstGeoObject = res.geoObjects.get(0);
+
+        if (!firstGeoObject) {
+          alert('Адрес не найден');
+          return;
+        }
+
+        const coords = firstGeoObject.geometry.getCoordinates();
+        const addressText = firstGeoObject.getAddressLine();
+
+        clearPlacemark();
+
+        placemark = new ymaps.Placemark(coords, {
+          balloonContent: addressText,
+          hintContent: addressText
+        }, {
+          preset: 'islands#redIcon'
+        });
+
+        map.geoObjects.add(placemark);
+        map.setCenter(coords, 15, { duration: 300 });
+
+        mapFooter.textContent = `Найден адрес: ${addressText}`;
+      }).catch(() => {
+        alert('Не удалось выполнить поиск адреса');
+      });
+    }
+
+    function switchCity(cityKey) {
       currentMapCity = cityKey;
-      mapWidget.innerHTML = '';
+      const cfg = cityConfig[cityKey];
 
-      const script = document.createElement('script');
-      script.type = 'text/javascript';
-      script.charset = 'utf-8';
-      script.async = true;
+      if (!map) return;
 
-      const mapHeight = getMapHeight();
-
-      script.src =
-        'https://api-maps.yandex.ru/services/constructor/1.0/js/' +
-        '?um=' + map.um +
-        '&width=100%25' +
-        '&height=' + mapHeight +
-        '&lang=ru_RU' +
-        '&scroll=true';
-
-      mapWidget.appendChild(script);
-
-      mapFooter.textContent = `Открыта карта: ${map.title}`;
+      clearPlacemark();
+      map.setCenter(cfg.center, cfg.zoom, { duration: 300 });
+      mapFooter.textContent = `Открыта карта: ${cfg.title}`;
 
       tabs.forEach(tab => {
         tab.classList.toggle('active', tab.dataset.city === cityKey);
       });
     }
 
-    function debounceReloadMap() {
+    function debounceResizeMap() {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
-        loadYandexConstructorMap(currentMapCity);
-      }, 200);
+        if (map) map.container.fitToViewport();
+      }, 150);
     }
 
     tabs.forEach(tab => {
       tab.addEventListener('click', () => {
-        loadYandexConstructorMap(tab.dataset.city);
+        switchCity(tab.dataset.city);
       });
+    });
+
+    searchAddressBtn.addEventListener('click', searchAddress);
+
+    addressInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        searchAddress();
+      }
+    });
+
+    clearMarkerBtn.addEventListener('click', () => {
+      clearPlacemark();
+      const cfg = cityConfig[currentMapCity];
+      mapFooter.textContent = `Открыта карта: ${cfg.title}`;
     });
 
     fileInput.addEventListener('change', () => {
@@ -719,12 +812,12 @@
 
     applyBtn.addEventListener('click', renderList);
     resetBtn.addEventListener('click', resetFilters);
+    window.addEventListener('resize', debounceResizeMap);
 
-    window.addEventListener('resize', debounceReloadMap);
-
-    // Инициализация
-    setButtonsEnabled(false);
-    loadYandexConstructorMap('MSK');
+    ymaps.ready(() => {
+      initMap();
+      setButtonsEnabled(false);
+    });
   </script>
 </body>
 </html>
