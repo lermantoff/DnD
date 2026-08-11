@@ -3,10 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Таблицы, фильтры и карты зон</title>
+  <title>Список, фильтры и карта зон</title>
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
-  <script src="https://api-maps.yandex.ru/2.1/?apikey=a43520a0-1f1d-4d57-990e-0c214436f7a6&lang=ru_RU"></script>
 
   <style>
     :root {
@@ -22,9 +21,7 @@
       --code-text: #075985;
     }
 
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
     body {
       margin: 0;
@@ -203,41 +200,33 @@
       white-space: nowrap;
     }
 
-    .table-wrap {
-      overflow: auto;
+    /* СПИСОК вместо таблицы */
+    .list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .row {
+      background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 14px;
+      box-shadow: var(--shadow);
+      padding: 12px 14px;
+      cursor: default;
+      transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
     }
 
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      min-width: 760px;
-      background: #fff;
+    .row:hover {
+      transform: translateY(-1px);
+      border-color: #c7d2fe;
+      box-shadow: 0 12px 28px rgba(37, 99, 235, 0.12);
     }
 
-    thead th {
-      position: sticky;
-      top: 0;
-      z-index: 1;
-      background: #f8fafc;
-      color: #111827;
-      text-align: left;
-      font-size: 13px;
-      border-bottom: 1px solid var(--border);
-      padding: 10px 12px;
-      white-space: nowrap;
-    }
-
-    tbody td {
-      border-bottom: 1px solid #f1f5f9;
-      padding: 10px 12px;
-      font-size: 13px;
-      vertical-align: top;
-    }
-
-    tbody tr:hover {
-      background: #f8fbff;
+    .row-inner {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      flex-wrap: wrap;
     }
 
     .code {
@@ -251,6 +240,16 @@
       font-weight: 800;
       font-size: 13px;
       letter-spacing: .2px;
+      flex: 0 0 auto;
+      min-width: 56px;
+    }
+
+    .title {
+      font-size: 14px;
+      line-height: 1.45;
+      font-weight: 600;
+      flex: 1;
+      min-width: 0;
     }
 
     .empty {
@@ -373,15 +372,7 @@
     }
 
     .zones-section {
-      flex: 1.1;
-      min-height: 0;
-      position: relative;
-      border-bottom: 1px solid var(--border);
-      background: #eef2f7;
-    }
-
-    .address-section {
-      flex: 0.9;
+      flex: 1;
       min-height: 0;
       position: relative;
       background: #eef2f7;
@@ -406,11 +397,6 @@
       border: 0;
       display: block;
       background: #eef2f7;
-    }
-
-    #addressMap {
-      width: 100%;
-      height: 100%;
     }
 
     .map-footer {
@@ -457,10 +443,6 @@
       .map-panel {
         min-height: 1200px;
       }
-
-      table {
-        min-width: 680px;
-      }
     }
   </style>
 </head>
@@ -481,7 +463,7 @@
 
           <div class="hint">
             Используется колонка E — <b>Оборудование</b>.<br>
-            Таблица: A — код, B — название, C — аннотация, E — оборудование.
+            Отображение: A — код, B — название, C — аннотация.
           </div>
         </div>
 
@@ -494,28 +476,12 @@
       <main class="content">
         <div class="results-wrap">
           <div class="results-head">
-            <h2>Таблица</h2>
+            <h2>Список</h2>
             <div class="counter" id="counter">Показано: 0 из 0</div>
           </div>
 
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th style="width: 90px;">Код</th>
-                  <th>Название</th>
-                  <th style="width: 220px;">Оборудование</th>
-                  <th style="width: 320px;">Аннотация</th>
-                </tr>
-              </thead>
-              <tbody id="tableBody">
-                <tr>
-                  <td colspan="4">
-                    <div class="empty">Загрузите Excel-файл, чтобы увидеть данные.</div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+          <div class="list" id="list">
+            <div class="empty">Загрузите Excel-файл, чтобы увидеть список.</div>
           </div>
         </div>
       </main>
@@ -534,12 +500,12 @@
 
       <div class="map-controls">
         <input id="addressInput" type="text" placeholder="Введите адрес, например: Москва, Тверская 7" />
-        <button class="btn-primary" id="searchAddressBtn">Показать точку</button>
+        <button class="btn-primary" id="searchAddressBtn">Показать адрес на карте</button>
         <button class="btn-secondary" id="clearAddressBtn">Очистить</button>
       </div>
 
       <div class="map-info" id="mapInfo">
-        Сверху — карты зон из конструктора. Снизу — отдельная карта с точкой по адресу через Yandex Maps API.
+        Сверху — карта зон. Адрес можно ввести в поле, и Яндекс попробует показать его прямо на этой карте.
       </div>
 
       <div class="zones-section">
@@ -553,11 +519,6 @@
         ></iframe>
       </div>
 
-      <div class="address-section">
-        <div class="section-label">Точка по адресу</div>
-        <div id="addressMap"></div>
-      </div>
-
       <div class="map-footer" id="mapFooter">
         Открыта карта: МСК
       </div>
@@ -568,11 +529,11 @@
 
   <script>
     // =========================
-    // ТАБЛИЦА + ФИЛЬТРЫ
+    // ЛЕВАЯ ЧАСТЬ: СПИСОК И ФИЛЬТРЫ
     // =========================
     const fileInput = document.getElementById('fileInput');
     const filtersEl = document.getElementById('filters');
-    const tableBody = document.getElementById('tableBody');
+    const listEl = document.getElementById('list');
     const counterEl = document.getElementById('counter');
     const resetBtn = document.getElementById('resetBtn');
     const tooltip = document.getElementById('tooltip');
@@ -619,7 +580,7 @@
         const code = row[0];       // A
         const title = row[1];      // B
         const annotation = row[2]; // C
-        const equipment = row[4];   // E
+        const equipment = row[4];  // E
 
         if (
           (code === undefined || code === null || String(code).trim() === '') &&
@@ -657,12 +618,12 @@
         cb.addEventListener('change', () => {
           if (cb.checked) selectedEquipment.add(cb.value);
           else selectedEquipment.delete(cb.value);
-          renderTable();
+          renderList();
         });
       });
     }
 
-    function renderTable() {
+    function renderList() {
       const filtered = items.filter(item => {
         if (selectedEquipment.size === 0) return true;
 
@@ -677,26 +638,22 @@
       counterEl.textContent = `Показано: ${filtered.length} из ${items.length}`;
 
       if (!filtered.length) {
-        tableBody.innerHTML = `
-          <tr>
-            <td colspan="4">
-              <div class="empty">Ничего не найдено по выбранному оборудованию.</div>
-            </td>
-          </tr>
+        listEl.innerHTML = `
+          <div class="empty">Ничего не найдено по выбранному оборудованию.</div>
         `;
         return;
       }
 
-      tableBody.innerHTML = filtered.map(item => `
-        <tr class="data-row" data-annotation="${escapeHtml(item.annotation || 'Нет аннотации')}">
-          <td><span class="code">${escapeHtml(item.code)}</span></td>
-          <td>${escapeHtml(item.title)}</td>
-          <td>${escapeHtml(item.equipment.join(', '))}</td>
-          <td>${escapeHtml(item.annotation || '')}</td>
-        </tr>
+      listEl.innerHTML = filtered.map(item => `
+        <div class="row" data-annotation="${escapeHtml(item.annotation || 'Нет аннотации')}">
+          <div class="row-inner">
+            <span class="code">${escapeHtml(item.code)}</span>
+            <div class="title">${escapeHtml(item.title)}</div>
+          </div>
+        </div>
       `).join('');
 
-      tableBody.querySelectorAll('.data-row').forEach(row => {
+      listEl.querySelectorAll('.row').forEach(row => {
         const text = row.dataset.annotation || 'Нет аннотации';
 
         row.addEventListener('mouseenter', () => {
@@ -730,7 +687,7 @@
     function resetFilters() {
       selectedEquipment.clear();
       filtersEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
-      renderTable();
+      renderList();
     }
 
     resetBtn.addEventListener('click', resetFilters);
@@ -755,7 +712,7 @@
         items = buildItemsFromSheet(rows);
 
         renderFilters();
-        renderTable();
+        renderList();
         resetBtn.disabled = false;
       };
 
@@ -763,17 +720,21 @@
     });
 
     // =========================
-    // ВИДЖЕТЫ ЗОН
+    // КАРТА ЗОН + ПОИСК АДРЕСА
     // =========================
     const zonesFrame = document.getElementById('zonesFrame');
     const zonesLabel = document.getElementById('zonesLabel');
     const mapFooter = document.getElementById('mapFooter');
+    const mapInfo = document.getElementById('mapInfo');
     const tabs = document.querySelectorAll('.tab');
+
+    const addressInput = document.getElementById('addressInput');
+    const searchAddressBtn = document.getElementById('searchAddressBtn');
+    const clearAddressBtn = document.getElementById('clearAddressBtn');
 
     const cityMaps = {
       MSK: {
         title: 'МСК',
-        // iframe-версия из constructor
         url: 'https://yandex.ru/map-widget/v1/?um=constructor%3A8295bdcbeecf3e8d0e76ad432e58a6d22e41258d88274ec6e194b34ffdc62d6a&source=constructor'
       },
       SPB: {
@@ -786,135 +747,69 @@
       }
     };
 
+    let currentCity = 'MSK';
+    let currentAddress = '';
+
+    function buildZoneUrl(cityKey, address = '') {
+      const baseUrl = cityMaps[cityKey].url;
+
+      if (!address) return baseUrl;
+
+      const separator = baseUrl.includes('?') ? '&' : '?';
+      return baseUrl + separator + 'text=' + encodeURIComponent(address);
+    }
+
     function setCity(cityKey) {
-      const cfg = cityMaps[cityKey];
-      zonesFrame.src = cfg.url;
-      zonesLabel.textContent = `Зоны: ${cfg.title}`;
-      mapFooter.textContent = `Открыта карта: ${cfg.title}`;
+      currentCity = cityKey;
+      zonesLabel.textContent = `Зоны: ${cityMaps[cityKey].title}`;
+      mapFooter.textContent = `Открыта карта: ${cityMaps[cityKey].title}`;
 
       tabs.forEach(tab => {
         tab.classList.toggle('active', tab.dataset.city === cityKey);
       });
 
-      currentCity = cityKey;
-      updateAddressHint();
+      zonesFrame.src = buildZoneUrl(cityKey, currentAddress);
+
+      if (currentAddress) {
+        mapInfo.textContent = `Город: ${cityMaps[cityKey].title}. Адрес: ${currentAddress}`;
+      } else {
+        mapInfo.textContent = `Показаны зоны города ${cityMaps[cityKey].title}.`;
+      }
+    }
+
+    function showAddressOnMap() {
+      const address = addressInput.value.trim();
+      if (!address) {
+        mapInfo.textContent = 'Введите адрес для поиска.';
+        return;
+      }
+
+      currentAddress = address;
+      zonesFrame.src = buildZoneUrl(currentCity, currentAddress);
+      mapInfo.textContent = `Идёт поиск адреса: ${address} в городе ${cityMaps[currentCity].title}`;
+    }
+
+    function clearAddress() {
+      currentAddress = '';
+      addressInput.value = '';
+      zonesFrame.src = buildZoneUrl(currentCity);
+      mapInfo.textContent = `Адрес очищен. Показаны зоны города ${cityMaps[currentCity].title}.`;
     }
 
     tabs.forEach(tab => {
       tab.addEventListener('click', () => setCity(tab.dataset.city));
     });
 
-    // =========================
-    // YANDEX MAPS API ДЛЯ АДРЕСА
-    // =========================
-    const addressInput = document.getElementById('addressInput');
-    const searchAddressBtn = document.getElementById('searchAddressBtn');
-    const clearAddressBtn = document.getElementById('clearAddressBtn');
-    const mapInfo = document.getElementById('mapInfo');
-
-    let currentCity = 'MSK';
-    let addressMap = null;
-    let addressPlacemark = null;
-
-    const cityCenters = {
-      MSK: { center: [55.751244, 37.618423], zoom: 10, title: 'Москва' },
-      SPB: { center: [59.93863, 30.31413], zoom: 10, title: 'Санкт-Петербург' },
-      EKB: { center: [56.838011, 60.597465], zoom: 10, title: 'Екатеринбург' }
-    };
-
-    function updateAddressHint() {
-      const cfg = cityCenters[currentCity];
-      mapInfo.textContent = `Показаны зоны города ${cityMaps[currentCity].title}. Ниже — поиск адреса для города: ${cfg.title}.`;
-      if (addressMap) {
-        addressMap.setCenter(cfg.center, cfg.zoom, { duration: 250 });
-      }
-    }
-
-    function initAddressMap() {
-      const cfg = cityCenters[currentCity];
-
-      addressMap = new ymaps.Map('addressMap', {
-        center: cfg.center,
-        zoom: cfg.zoom,
-        controls: ['zoomControl', 'typeSelector', 'fullscreenControl']
-      }, {
-        suppressMapOpenBlock: true
-      });
-
-      updateAddressHint();
-      window.addEventListener('resize', () => {
-        if (addressMap) addressMap.container.fitToViewport();
-      });
-    }
-
-    function searchAddress() {
-      const query = addressInput.value.trim();
-      if (!query) {
-        mapInfo.textContent = 'Введите адрес для поиска.';
-        return;
-      }
-
-      const cityTitle = cityCenters[currentCity].title;
-      const searchText = `${query}, ${cityTitle}`;
-
-      ymaps.geocode(searchText, { results: 1 }).then(res => {
-        const firstGeoObject = res.geoObjects.get(0);
-
-        if (!firstGeoObject) {
-          mapInfo.textContent = `Адрес не найден: ${searchText}`;
-          return;
-        }
-
-        const coords = firstGeoObject.geometry.getCoordinates();
-        const addressText = firstGeoObject.getAddressLine() || searchText;
-
-        if (addressPlacemark) {
-          addressMap.geoObjects.remove(addressPlacemark);
-          addressPlacemark = null;
-        }
-
-        addressPlacemark = new ymaps.Placemark(
-          coords,
-          {
-            balloonContentHeader: 'Найденный адрес',
-            balloonContentBody: addressText
-          },
-          {
-            preset: 'islands#redDotIcon',
-            zIndex: 1000
-          }
-        );
-
-        addressMap.geoObjects.add(addressPlacemark);
-        addressMap.setCenter(coords, 16, { duration: 250 });
-        addressPlacemark.balloon.open();
-
-        mapInfo.textContent = `Адрес найден: ${addressText}`;
-      }).catch(() => {
-        mapInfo.textContent = 'Ошибка геокодирования адреса.';
-      });
-    }
-
-    function clearAddress() {
-      addressInput.value = '';
-      if (addressPlacemark && addressMap) {
-        addressMap.geoObjects.remove(addressPlacemark);
-        addressPlacemark = null;
-      }
-      mapInfo.textContent = `Адрес очищен. Показаны зоны города ${cityMaps[currentCity].title}.`;
-      updateAddressHint();
-    }
-
-    searchAddressBtn.addEventListener('click', searchAddress);
+    searchAddressBtn.addEventListener('click', showAddressOnMap);
     clearAddressBtn.addEventListener('click', clearAddress);
 
     addressInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') searchAddress();
+      if (e.key === 'Enter') {
+        showAddressOnMap();
+      }
     });
 
-    ymaps.ready(initAddressMap);
-
-    // Инициализация
+    // init
     setCity('MSK');
     resetBtn.disabled = true;
   </script>
