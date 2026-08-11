@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Таблицы, фильтры и карта зон</title>
+  <title>Таблицы, фильтры и карты зон</title>
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
   <script src="https://api-maps.yandex.ru/2.1/?apikey=a43520a0-1f1d-4d57-990e-0c214436f7a6&lang=ru_RU"></script>
@@ -372,14 +372,22 @@
       line-height: 1.45;
     }
 
-    .map-area {
-      flex: 1;
+    .zones-section {
+      flex: 1.1;
+      min-height: 0;
+      position: relative;
+      border-bottom: 1px solid var(--border);
+      background: #eef2f7;
+    }
+
+    .address-section {
+      flex: 0.9;
       min-height: 0;
       position: relative;
       background: #eef2f7;
     }
 
-    .map-label {
+    .section-label {
       position: absolute;
       z-index: 5;
       left: 12px;
@@ -392,7 +400,15 @@
       backdrop-filter: blur(6px);
     }
 
-    #map {
+    .map-frame {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      display: block;
+      background: #eef2f7;
+    }
+
+    #addressMap {
       width: 100%;
       height: 100%;
     }
@@ -419,7 +435,7 @@
       .map-panel {
         width: 100%;
         height: auto;
-        min-height: 900px;
+        min-height: 1100px;
       }
     }
 
@@ -439,7 +455,7 @@
       }
 
       .map-panel {
-        min-height: 1000px;
+        min-height: 1200px;
       }
 
       table {
@@ -523,12 +539,23 @@
       </div>
 
       <div class="map-info" id="mapInfo">
-        Сверху — зоны, нарисованные полигонами. Ниже — поиск адреса и точка на той же карте.
+        Сверху — карты зон из конструктора. Снизу — отдельная карта с точкой по адресу через Yandex Maps API.
       </div>
 
-      <div class="map-area">
-        <div class="map-label" id="mapLabel">Зоны: МСК</div>
-        <div id="map"></div>
+      <div class="zones-section">
+        <div class="section-label" id="zonesLabel">Зоны: МСК</div>
+        <iframe
+          id="zonesFrame"
+          class="map-frame"
+          src="https://yandex.ru/map-widget/v1/?um=constructor%3A8295bdcbeecf3e8d0e76ad432e58a6d22e41258d88274ec6e194b34ffdc62d6a&source=constructor"
+          loading="lazy"
+          referrerpolicy="no-referrer-when-downgrade"
+        ></iframe>
+      </div>
+
+      <div class="address-section">
+        <div class="section-label">Точка по адресу</div>
+        <div id="addressMap"></div>
       </div>
 
       <div class="map-footer" id="mapFooter">
@@ -541,7 +568,7 @@
 
   <script>
     // =========================
-    // ДАННЫЕ ДЛЯ ТАБЛИЦЫ
+    // ТАБЛИЦА + ФИЛЬТРЫ
     // =========================
     const fileInput = document.getElementById('fileInput');
     const filtersEl = document.getElementById('filters');
@@ -736,135 +763,87 @@
     });
 
     // =========================
-    // YANDEX MAPS API
+    // ВИДЖЕТЫ ЗОН
     // =========================
-    let map;
-    let currentCity = 'MSK';
-    let zoneObjects = [];
-    let markerObject = null;
-
-    const mapInfo = document.getElementById('mapInfo');
-    const mapLabel = document.getElementById('mapLabel');
+    const zonesFrame = document.getElementById('zonesFrame');
+    const zonesLabel = document.getElementById('zonesLabel');
     const mapFooter = document.getElementById('mapFooter');
-    const addressInput = document.getElementById('addressInput');
-    const searchAddressBtn = document.getElementById('searchAddressBtn');
-    const clearAddressBtn = document.getElementById('clearAddressBtn');
     const tabs = document.querySelectorAll('.tab');
 
-    // ВАЖНО:
-    // Эти координаты — пример.
-    // Замените их на координаты ваших реальных зон.
-    // Формат polygon: массив точек [широта, долгота]
-    const cityZones = {
+    const cityMaps = {
       MSK: {
         title: 'МСК',
-        center: [55.751244, 37.618423],
-        zoom: 10,
-        polygons: [
-          {
-            name: 'Зона МСК 1',
-            coords: [[
-              [55.88, 37.35],
-              [55.88, 37.75],
-              [55.67, 37.75],
-              [55.67, 37.35]
-            ]],
-            fillColor: 'rgba(37, 99, 235, 0.20)',
-            strokeColor: '#2563eb'
-          }
-        ]
+        // iframe-версия из constructor
+        url: 'https://yandex.ru/map-widget/v1/?um=constructor%3A8295bdcbeecf3e8d0e76ad432e58a6d22e41258d88274ec6e194b34ffdc62d6a&source=constructor'
       },
       SPB: {
         title: 'СПБ',
-        center: [59.93863, 30.31413],
-        zoom: 10,
-        polygons: [
-          {
-            name: 'Зона СПБ 1',
-            coords: [[
-              [60.05, 30.15],
-              [60.05, 30.55],
-              [59.80, 30.55],
-              [59.80, 30.15]
-            ]],
-            fillColor: 'rgba(16, 185, 129, 0.20)',
-            strokeColor: '#10b981'
-          }
-        ]
+        url: 'https://yandex.ru/map-widget/v1/?um=constructor%3Af03dbf89d34bdd131d7b43863d259c253aec81acf7f8007491c3bea017c14f19&source=constructor'
       },
       EKB: {
         title: 'ЕКБ',
-        center: [56.838011, 60.597465],
-        zoom: 10,
-        polygons: [
-          {
-            name: 'Зона ЕКБ 1',
-            coords: [[
-              [56.95, 60.45],
-              [56.95, 60.78],
-              [56.75, 60.78],
-              [56.75, 60.45]
-            ]],
-            fillColor: 'rgba(245, 158, 11, 0.22)',
-            strokeColor: '#f59e0b'
-          }
-        ]
+        url: 'https://yandex.ru/map-widget/v1/?um=constructor%3A10f3e0f619824ddbbf4a7fb4f36fa3d330ebdbcec5a70d7b104eadcf2f3fae8d&source=constructor'
       }
     };
 
     function setCity(cityKey) {
-      currentCity = cityKey;
-      const cfg = cityZones[cityKey];
+      const cfg = cityMaps[cityKey];
+      zonesFrame.src = cfg.url;
+      zonesLabel.textContent = `Зоны: ${cfg.title}`;
+      mapFooter.textContent = `Открыта карта: ${cfg.title}`;
 
       tabs.forEach(tab => {
         tab.classList.toggle('active', tab.dataset.city === cityKey);
       });
 
-      mapLabel.textContent = `Зоны: ${cfg.title}`;
-      mapFooter.textContent = `Открыта карта: ${cfg.title}`;
-      mapInfo.textContent = `Показаны зоны города ${cfg.title}. Введите адрес, чтобы поставить точку на этой же карте.`;
+      currentCity = cityKey;
+      updateAddressHint();
+    }
 
-      if (map) {
-        renderCityZones();
-        map.setCenter(cfg.center, cfg.zoom, { duration: 250 });
-        if (addressInput.value.trim()) {
-          searchAddress();
-        }
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => setCity(tab.dataset.city));
+    });
+
+    // =========================
+    // YANDEX MAPS API ДЛЯ АДРЕСА
+    // =========================
+    const addressInput = document.getElementById('addressInput');
+    const searchAddressBtn = document.getElementById('searchAddressBtn');
+    const clearAddressBtn = document.getElementById('clearAddressBtn');
+    const mapInfo = document.getElementById('mapInfo');
+
+    let currentCity = 'MSK';
+    let addressMap = null;
+    let addressPlacemark = null;
+
+    const cityCenters = {
+      MSK: { center: [55.751244, 37.618423], zoom: 10, title: 'Москва' },
+      SPB: { center: [59.93863, 30.31413], zoom: 10, title: 'Санкт-Петербург' },
+      EKB: { center: [56.838011, 60.597465], zoom: 10, title: 'Екатеринбург' }
+    };
+
+    function updateAddressHint() {
+      const cfg = cityCenters[currentCity];
+      mapInfo.textContent = `Показаны зоны города ${cityMaps[currentCity].title}. Ниже — поиск адреса для города: ${cfg.title}.`;
+      if (addressMap) {
+        addressMap.setCenter(cfg.center, cfg.zoom, { duration: 250 });
       }
     }
 
-    function clearMarker() {
-      if (markerObject && map) {
-        map.geoObjects.remove(markerObject);
-        markerObject = null;
-      }
-    }
+    function initAddressMap() {
+      const cfg = cityCenters[currentCity];
 
-    function clearZones() {
-      if (!map) return;
-      zoneObjects.forEach(obj => map.geoObjects.remove(obj));
-      zoneObjects = [];
-    }
+      addressMap = new ymaps.Map('addressMap', {
+        center: cfg.center,
+        zoom: cfg.zoom,
+        controls: ['zoomControl', 'typeSelector', 'fullscreenControl']
+      }, {
+        suppressMapOpenBlock: true
+      });
 
-    function renderCityZones() {
-      if (!map) return;
-
-      clearZones();
-
-      const cfg = cityZones[currentCity];
-
-      cfg.polygons.forEach(zone => {
-        const polygon = new ymaps.Polygon(zone.coords, {
-          hintContent: zone.name
-        }, {
-          fillColor: zone.fillColor,
-          strokeColor: zone.strokeColor,
-          strokeWidth: 2,
-          opacity: 0.7
-        });
-
-        zoneObjects.push(polygon);
-        map.geoObjects.add(polygon);
+      updateAddressHint();
+      window.addEventListener('resize', () => {
+        if (addressMap) addressMap.container.fitToViewport();
       });
     }
 
@@ -875,20 +854,26 @@
         return;
       }
 
-      ymaps.geocode(query, { results: 1 }).then(res => {
+      const cityTitle = cityCenters[currentCity].title;
+      const searchText = `${query}, ${cityTitle}`;
+
+      ymaps.geocode(searchText, { results: 1 }).then(res => {
         const firstGeoObject = res.geoObjects.get(0);
 
         if (!firstGeoObject) {
-          mapInfo.textContent = 'Адрес не найден.';
+          mapInfo.textContent = `Адрес не найден: ${searchText}`;
           return;
         }
 
         const coords = firstGeoObject.geometry.getCoordinates();
-        const addressText = firstGeoObject.getAddressLine() || query;
+        const addressText = firstGeoObject.getAddressLine() || searchText;
 
-        clearMarker();
+        if (addressPlacemark) {
+          addressMap.geoObjects.remove(addressPlacemark);
+          addressPlacemark = null;
+        }
 
-        markerObject = new ymaps.Placemark(
+        addressPlacemark = new ymaps.Placemark(
           coords,
           {
             balloonContentHeader: 'Найденный адрес',
@@ -900,54 +885,38 @@
           }
         );
 
-        map.geoObjects.add(markerObject);
-        map.setCenter(coords, 16, { duration: 250 });
-        markerObject.balloon.open();
+        addressMap.geoObjects.add(addressPlacemark);
+        addressMap.setCenter(coords, 16, { duration: 250 });
+        addressPlacemark.balloon.open();
 
-        mapInfo.textContent = `Адрес найден: ${addressText}. Точка поставлена на карте.`;
+        mapInfo.textContent = `Адрес найден: ${addressText}`;
       }).catch(() => {
         mapInfo.textContent = 'Ошибка геокодирования адреса.';
       });
     }
 
-    function initMap() {
-      const cfg = cityZones[currentCity];
-
-      map = new ymaps.Map('map', {
-        center: cfg.center,
-        zoom: cfg.zoom,
-        controls: ['zoomControl', 'typeSelector', 'fullscreenControl']
-      }, {
-        suppressMapOpenBlock: true
-      });
-
-      renderCityZones();
-      setCity('MSK');
-
-      searchAddressBtn.addEventListener('click', searchAddress);
-
-      addressInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') searchAddress();
-      });
-
-      clearAddressBtn.addEventListener('click', () => {
-        addressInput.value = '';
-        clearMarker();
-        mapInfo.textContent = `Адрес очищен. Показаны зоны города ${cityZones[currentCity].title}.`;
-      });
-
-      tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-          setCity(tab.dataset.city);
-        });
-      });
-
-      window.addEventListener('resize', () => {
-        if (map) map.container.fitToViewport();
-      });
+    function clearAddress() {
+      addressInput.value = '';
+      if (addressPlacemark && addressMap) {
+        addressMap.geoObjects.remove(addressPlacemark);
+        addressPlacemark = null;
+      }
+      mapInfo.textContent = `Адрес очищен. Показаны зоны города ${cityMaps[currentCity].title}.`;
+      updateAddressHint();
     }
 
-    ymaps.ready(initMap);
+    searchAddressBtn.addEventListener('click', searchAddress);
+    clearAddressBtn.addEventListener('click', clearAddress);
+
+    addressInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') searchAddress();
+    });
+
+    ymaps.ready(initAddressMap);
+
+    // Инициализация
+    setCity('MSK');
+    resetBtn.disabled = true;
   </script>
 </body>
 </html>
