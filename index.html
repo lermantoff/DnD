@@ -13,7 +13,6 @@
       --text: #1f2430;
       --muted: #667085;
       --accent: #2563eb;
-      --accent-2: #dbeafe;
       --shadow: 0 10px 30px rgba(16, 24, 40, 0.08);
       --code-bg: #e0f2fe;
       --code-text: #075985;
@@ -328,17 +327,16 @@
       border-color: var(--accent);
     }
 
-    .map-frame-wrap {
+    .map-widget-wrap {
       flex: 1;
       min-height: 700px;
       background: #eef2f7;
+      position: relative;
     }
 
-    .map-frame {
+    .map-widget {
       width: 100%;
       height: 100%;
-      border: 0;
-      display: block;
       min-height: 700px;
       background: #eef2f7;
     }
@@ -365,6 +363,11 @@
         width: 100%;
         min-height: 600px;
       }
+
+      .map-widget-wrap,
+      .map-widget {
+        min-height: 600px;
+      }
     }
 
     @media (max-width: 900px) {
@@ -378,8 +381,8 @@
         position: static;
       }
 
-      .map-frame-wrap,
-      .map-frame {
+      .map-widget-wrap,
+      .map-widget {
         min-height: 500px;
       }
     }
@@ -430,6 +433,7 @@
     <section class="map-panel">
       <div class="map-header">
         <h2>Карта</h2>
+
         <div class="tabs">
           <button class="tab active" data-city="MSK">МСК</button>
           <button class="tab" data-city="SPB">СПБ</button>
@@ -437,14 +441,8 @@
         </div>
       </div>
 
-      <div class="map-frame-wrap">
-        <iframe
-          id="mapFrame"
-          class="map-frame"
-          src="https://yandex.ru/maps/10715/aprelevka/?ll=37.032172%2C55.533987&mode=usermaps&source=constructorLink&um=constructor%3A8295bdcbeecf3e8d0e76ad432e58a6d22e41258d88274ec6e194b34ffdc62d6a&z=8"
-          allowfullscreen
-          loading="lazy"
-        ></iframe>
+      <div class="map-widget-wrap">
+        <div id="mapWidget" class="map-widget"></div>
       </div>
 
       <div class="map-footer" id="mapFooter">
@@ -463,7 +461,8 @@
     const applyBtn = document.getElementById('applyBtn');
     const resetBtn = document.getElementById('resetBtn');
     const tooltip = document.getElementById('tooltip');
-    const mapFrame = document.getElementById('mapFrame');
+
+    const mapWidget = document.getElementById('mapWidget');
     const mapFooter = document.getElementById('mapFooter');
     const tabs = document.querySelectorAll('.tab');
 
@@ -473,15 +472,15 @@
     const mapLinks = {
       MSK: {
         title: 'МСК',
-        url: 'https://yandex.ru/maps/10715/aprelevka/?ll=37.032172%2C55.533987&mode=usermaps&source=constructorLink&um=constructor%3A8295bdcbeecf3e8d0e76ad432e58a6d22e41258d88274ec6e194b34ffdc62d6a&z=8'
+        um: 'constructor%3A8295bdcbeecf3e8d0e76ad432e58a6d22e41258d88274ec6e194b34ffdc62d6a'
       },
       SPB: {
         title: 'СПБ',
-        url: 'https://yandex.ru/maps/2/saint-petersburg/?ll=30.132506%2C59.970240&mode=usermaps&source=constructorLink&um=constructor%3Af03dbf89d34bdd131d7b43863d259c253aec81acf7f8007491c3bea017c14f19&z=8'
+        um: 'constructor%3Af03dbf89d34bdd131d7b43863d259c253aec81acf7f8007491c3bea017c14f19'
       },
       EKB: {
         title: 'ЕКБ',
-        url: 'https://yandex.ru/maps/54/yekaterinburg/?ll=60.902653%2C56.782144&mode=usermaps&source=constructorLink&um=constructor%3A10f3e0f619824ddbbf4a7fb4f36fa3d330ebdbcec5a70d7b104eadcf2f3fae8d&z=8'
+        um: 'constructor%3A10f3e0f619824ddbbf4a7fb4f36fa3d330ebdbcec5a70d7b104eadcf2f3fae8d'
       }
     };
 
@@ -630,11 +629,26 @@
       resetBtn.disabled = !enabled;
     }
 
-    function setMap(cityKey) {
+    function loadYandexConstructorMap(cityKey) {
       const map = mapLinks[cityKey];
       if (!map) return;
 
-      mapFrame.src = map.url;
+      mapWidget.innerHTML = '';
+
+      const script = document.createElement('script');
+      script.type = 'text/javascript';
+      script.charset = 'utf-8';
+      script.async = true;
+      script.src =
+        'https://api-maps.yandex.ru/services/constructor/1.0/js/' +
+        '?um=' + map.um +
+        '&width=100%25' +
+        '&height=100%25' +
+        '&lang=ru_RU' +
+        '&scroll=true';
+
+      mapWidget.appendChild(script);
+
       mapFooter.textContent = `Открыта карта: ${map.title}`;
 
       tabs.forEach(tab => {
@@ -644,7 +658,7 @@
 
     tabs.forEach(tab => {
       tab.addEventListener('click', () => {
-        setMap(tab.dataset.city);
+        loadYandexConstructorMap(tab.dataset.city);
       });
     });
 
@@ -680,7 +694,7 @@
 
     // стартовая инициализация
     setButtonsEnabled(false);
-    setMap('MSK');
+    loadYandexConstructorMap('MSK');
   </script>
 </body>
 </html>
