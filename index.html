@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Форма + Карта зон + Точка по адресу</title>
+  <title>Фильтр + Карта зон + Адрес</title>
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 
@@ -39,6 +39,7 @@
       align-items: flex-start;
     }
 
+    /* Левая колонка */
     .workspace {
       width: 100%;
       max-width: 40vw;
@@ -274,6 +275,7 @@
       line-height: 1.4;
     }
 
+    /* Правая колонка */
     .map-panel {
       flex: 1;
       min-width: 0;
@@ -414,12 +416,6 @@
       flex: 0 0 auto;
     }
 
-    .small-note {
-      margin-top: 6px;
-      font-size: 12px;
-      color: #4b5563;
-    }
-
     @media (max-width: 1200px) {
       .page {
         flex-direction: column;
@@ -533,7 +529,7 @@
       </div>
 
       <div class="map-info" id="mapInfo">
-        Сверху — ваша карта зон. Снизу — точка по адресу на обычной Яндекс.Карте.
+        Сверху — ваша карта зон. Снизу — карта по адресу.
       </div>
 
       <div class="map-split">
@@ -542,7 +538,7 @@
           <iframe
             id="zonesFrame"
             class="map-frame"
-            src="https://yandex.ru/maps/10715/aprelevka/?ll=37.032172%2C55.533987&mode=usermaps&source=constructorLink&um=constructor%3A8295bdcbeecf3e8d0e76ad432e58a6d22e41258d88274ec6e194b34ffdc62d6a&z=8"
+            src="https://yandex.ru/map-widget/v1/?um=constructor%3A8295bdcbeecf3e8d0e76ad432e58a6d22e41258d88274ec6e194b34ffdc62d6a&source=constructor"
             loading="lazy"
             referrerpolicy="no-referrer-when-downgrade"
           ></iframe>
@@ -595,15 +591,15 @@
     const cityMaps = {
       MSK: {
         title: 'МСК',
-        url: 'https://yandex.ru/maps/10715/aprelevka/?ll=37.032172%2C55.533987&mode=usermaps&source=constructorLink&um=constructor%3A8295bdcbeecf3e8d0e76ad432e58a6d22e41258d88274ec6e194b34ffdc62d6a&z=8'
+        url: 'https://yandex.ru/map-widget/v1/?um=constructor%3A8295bdcbeecf3e8d0e76ad432e58a6d22e41258d88274ec6e194b34ffdc62d6a&source=constructor'
       },
       SPB: {
         title: 'СПБ',
-        url: 'https://yandex.ru/maps/2/saint-petersburg/?ll=30.132506%2C59.970240&mode=usermaps&source=constructorLink&um=constructor%3Af03dbf89d34bdd131d7b43863d259c253aec81acf7f8007491c3bea017c14f19&z=8'
+        url: 'https://yandex.ru/map-widget/v1/?um=constructor%3Af03dbf89d34bdd131d7b43863d259c253aec81acf7f8007491c3bea017c14f19&source=constructor'
       },
       EKB: {
         title: 'ЕКБ',
-        url: 'https://yandex.ru/maps/54/yekaterinburg/?ll=60.902653%2C56.782144&mode=usermaps&source=constructorLink&um=constructor%3A10f3e0f619824ddbbf4a7fb4f36fa3d330ebdbcec5a70d7b104eadcf2f3fae8d&z=8'
+        url: 'https://yandex.ru/map-widget/v1/?um=constructor%3A10f3e0f619824ddbbf4a7fb4f36fa3d330ebdbcec5a70d7b104eadcf2f3fae8d&source=constructor'
       }
     };
 
@@ -643,10 +639,10 @@
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i] || [];
 
-        const code = row[0];
-        const title = row[1];
-        const annotation = row[2];
-        const equipment = row[4];
+        const code = row[0];       // A
+        const title = row[1];      // B
+        const annotation = row[2]; // C
+        const equipment = row[4];  // E
 
         if ((code === undefined || code === null || String(code).trim() === '') && !title) continue;
 
@@ -771,13 +767,13 @@
         addressFrame.src = 'about:blank';
       }
 
-      mapInfo.textContent = 'Введите адрес и нажмите «Показать точку». Точка откроется на отдельной встроенной карте.';
+      mapInfo.textContent = 'Введите адрес и нажмите «Показать точку».';
     }
 
     function updateAddressPreview(address) {
       const cityTitle = cityMaps[currentCity].title;
       const query = encodeURIComponent(`${address}, ${cityTitle}`);
-      addressFrame.src = `https://yandex.ru/maps/?text=${query}&z=16`;
+      addressFrame.src = `https://yandex.ru/map-widget/v1/?text=${query}&z=16`;
       mapInfo.textContent = `Показан адрес: ${address}. Город: ${cityTitle}.`;
     }
 
@@ -838,6 +834,7 @@
     applyBtn.addEventListener('click', renderList);
     resetBtn.addEventListener('click', resetFilters);
 
+    // Инициализация
     setButtonsEnabled(false);
     setCity('MSK');
   </script>
